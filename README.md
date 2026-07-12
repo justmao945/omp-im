@@ -34,7 +34,8 @@ Manage the process:
 
 ```bash
 pm2 status
-pm2 logs omp-im
+pm2 logs omp-im                    # stream logs (keeps running)
+pm2 logs omp-im --lines 20 --nostream   # print last 20 lines and exit
 pm2 restart omp-im
 make pm2-stop
 ```
