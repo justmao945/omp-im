@@ -5,8 +5,10 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/justmao945/omp-im/internal/core"
@@ -125,5 +127,37 @@ func TestDecryptWecomAES(t *testing.T) {
 	}
 	if string(got) != string(plain) {
 		t.Fatalf("decrypted = %q", got)
+	}
+}
+
+func TestDecodeWeComAESKeyVariants(t *testing.T) {
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+
+	cases := []struct {
+		name string
+		in   string
+	}{
+		{"std base64", base64.StdEncoding.EncodeToString(key)},
+		{"url-safe base64", base64.URLEncoding.EncodeToString(key)},
+		{"hex", hex.EncodeToString(key)},
+		{"with whitespace", base64.StdEncoding.EncodeToString(key)[:42] + "\n\t " + base64.StdEncoding.EncodeToString(key)[42:]},
+		{"unpadded", strings.TrimRight(base64.StdEncoding.EncodeToString(key), "=")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := decodeWeComAESKey(tc.in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) < 32 {
+				t.Fatalf("short key: %d", len(got))
+			}
+			if string(got[:32]) != string(key) {
+				t.Fatalf("key mismatch")
+			}
+		})
 	}
 }

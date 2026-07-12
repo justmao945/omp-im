@@ -124,6 +124,7 @@ func (p *Platform) handleFrame(frame *wsFrame) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	images := p.collectInboundImages(ctx, msg)
+	slog.Debug("wecom: collected inbound images", "msgtype", msg.msgtype, "expected", len(msg.images), "collected", len(images))
 
 	sessionKey := fmt.Sprintf("wecom:%s", msg.chatid)
 	coreMsg := &core.Message{

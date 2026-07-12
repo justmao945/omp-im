@@ -1,6 +1,9 @@
 package wecom
 
-import "strings"
+import (
+	"log/slog"
+	"strings"
+)
 
 // inboundMessage represents a parsed message from the WeCom WebSocket gateway.
 type inboundMessage struct {
@@ -100,6 +103,8 @@ func parseInboundMessage(frame *wsFrame) *inboundMessage {
 			m.text, _ = voice["content"].(string)
 		}
 	}
+
+	slog.Debug("wecom: parsed inbound message", "msgtype", msgtype, "text_len", len(m.text), "images", len(m.images), "from", fromUser)
 
 	return m
 }
