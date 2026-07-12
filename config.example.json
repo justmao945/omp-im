@@ -1,0 +1,23 @@
+{
+  "agent": {
+    "command": "omp",
+    "args": ["acp"],
+    "work_dir": "/path/to/project",
+    "auto_approve_tools": true
+  },
+  "platforms": [
+    {
+      "type": "weixin",
+      "options": {
+        "token": "your-ilink-bot-bearer-token",
+        "base_url": "https://ilinkai.weixin.qq.com",
+        "cdn_base_url": "https://novac2c.cdn.weixin.qq.com/c2c",
+        "allow_from": "user1@im.wechat,user2@im.wechat",
+        "state_dir": "./data/weixin/default",
+        "account_id": "default",
+        "long_poll_timeout_ms": 35000,
+        "proxy": "http://127.0.0.1:7890"
+      }
+    }
+  ]
+}
