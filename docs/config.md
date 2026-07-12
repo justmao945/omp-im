@@ -35,7 +35,7 @@
 | `projects` | `[]ProjectConfig` | Named working directories passed to the agent. |
 | `default.agent` | `string` | Default agent for new conversations. |
 | `default.project` | `string` | Default project for new conversations. |
-| `platforms` | `[]PlatformConfig` | IM platforms. Currently only `weixin` is supported. |
+| `platforms` | `[]PlatformConfig` | IM platforms. `weixin` and `wecom` are supported. |
 | `session_store` | `string` | Optional path to persist agent session IDs. Defaults to `~/.omp-im/sessions.json`. |
 
 ### ProjectConfig
@@ -60,6 +60,18 @@
 | `long_poll_timeout_ms` | `int` | Long-poll timeout in milliseconds. Defaults to `35000`. |
 | `proxy` | `string` | Optional HTTP proxy for the iLink gateway. |
 | `route_tag` | `string` | Optional route tag passed to the iLink API. |
+
+### WeCom options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `bot_id` | `string` | **Required.** WeCom AI bot ID. |
+| `secret` | `string` | **Required.** WeCom AI bot long-connection secret. |
+| `websocket_url` | `string` | Optional gateway URL. Defaults to `wss://openws.work.weixin.qq.com`. |
+| `allow_from` | `string` | Comma-separated list of allowed sender user IDs for direct messages. `"*"` or empty allows everyone. |
+| `group_allow_from` | `string` | Comma-separated list of allowed group chat IDs. `"*"` or empty allows all groups. |
+
+Sessions are isolated by chat: each group chat uses its own `session_key` (`wecom:<chatid>`), and each direct message user also gets a separate session.
 
 ## QR-code login
 

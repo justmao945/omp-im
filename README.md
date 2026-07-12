@@ -1,6 +1,6 @@
 # omp-im
 
-IM connector for local AI agents. Currently supports Weixin (personal) via the iLink Bot protocol and the built-in `omp` ACP agent; CLAUDE Code / Codex CLI support is planned.
+IM connector for local AI agents. Currently supports Weixin (personal) via the iLink Bot protocol and WeCom (enterprise) via AI bot WebSocket long connection; more platforms may follow.
 
 ## Run
 

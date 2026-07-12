@@ -16,6 +16,15 @@
       "options": {
         "allow_from": "*"
       }
+    },
+    {
+      "type": "wecom",
+      "options": {
+        "bot_id": "YOUR_BOT_ID",
+        "secret": "YOUR_BOT_SECRET",
+        "allow_from": "*",
+        "group_allow_from": "*"
+      }
     }
   ]
 }

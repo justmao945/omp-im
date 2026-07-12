@@ -129,7 +129,7 @@ func (c *Config) Validate() error {
 	}
 	for i, p := range c.Platforms {
 		switch p.Type {
-		case "weixin", "http":
+		case "weixin", "http", "wecom":
 			// ok
 		default:
 			return fmt.Errorf("platforms[%d] unsupported type %q", i, p.Type)
