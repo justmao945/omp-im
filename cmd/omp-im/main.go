@@ -8,18 +8,18 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
 	"github.com/justmao945/omp-im/internal/agent"
 	"github.com/justmao945/omp-im/internal/config"
 	"github.com/justmao945/omp-im/internal/core"
+	"github.com/justmao945/omp-im/internal/platform/http"
 	"github.com/justmao945/omp-im/internal/platform/weixin"
 )
 
 func main() {
 	var (
-		configPath = flag.String("config", defaultConfigPath(), "path to config.json")
+		configPath = flag.String("config", config.DefaultPath(), "path to config.json")
 		logLevel   = flag.String("log-level", "info", "log level: debug|info|warn|error")
 	)
 	flag.CommandLine.Usage = func() {
@@ -140,6 +140,12 @@ func runServer(configPath string) error {
 				return fmt.Errorf("create weixin platform %d: %w", i, err)
 			}
 			engine.AddPlatform(p)
+		case "http":
+			p, err := http.New(pc.Options)
+			if err != nil {
+				return fmt.Errorf("create http platform %d: %w", i, err)
+			}
+			engine.AddPlatform(p)
 		default:
 			return fmt.Errorf("unsupported platform %d: %s", i, pc.Type)
 		}
@@ -177,12 +183,4 @@ func setupLogger(level string) {
 		lv = slog.LevelInfo
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lv})))
-}
-
-func defaultConfigPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".", ".omp-im", "config.json")
-	}
-	return filepath.Join(home, ".omp-im", "config.json")
 }

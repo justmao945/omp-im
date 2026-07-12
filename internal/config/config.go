@@ -40,6 +40,15 @@ type PlatformConfig struct {
 	Options map[string]any `json:"options"`
 }
 
+// DefaultPath returns the default configuration path (~/.omp-im/config.json).
+func DefaultPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".", ".omp-im", "config.json")
+	}
+	return filepath.Join(home, ".omp-im", "config.json")
+}
+
 // Load reads and parses the JSON file at path.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
@@ -120,8 +129,8 @@ func (c *Config) Validate() error {
 	}
 	for i, p := range c.Platforms {
 		switch p.Type {
-		case "weixin":
-			// Token is optional with QR login; nothing required here.
+		case "weixin", "http":
+			// ok
 		default:
 			return fmt.Errorf("platforms[%d] unsupported type %q", i, p.Type)
 		}

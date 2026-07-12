@@ -1,7 +1,10 @@
 package acp
 
 import (
+	"context"
+	"os/exec"
 	"testing"
+	"time"
 
 	"github.com/justmao945/omp-im/internal/core"
 )
@@ -62,5 +65,35 @@ func TestModelPreservedOnConfigOptionUpdate(t *testing.T) {
 		t.Fatalf("model = %q, want new-model", s.agentStatus.Model)
 	}
 }
+
+func TestModelDetectedOnRealSession(t *testing.T) {
+	if _, err := exec.LookPath("omp"); err != nil {
+		t.Skip("omp not in PATH")
+	}
+
+	workDir := t.TempDir()
+	cfg := Config{Command: "omp", Args: []string{"acp"}, WorkDir: workDir, AutoApproveTools: true}
+	tr, err := NewTransport(cfg, nil)
+	if err != nil {
+		t.Fatalf("new transport: %v", err)
+	}
+	defer tr.close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	s, err := NewSession(ctx, cfg, "test:u1", "", tr)
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	defer s.Close()
+
+	st := s.Status()
+	t.Logf("status: %+v", st)
+	if st.Model == "" {
+		t.Fatalf("model not detected; status = %+v", st)
+	}
+}
+
 
 
