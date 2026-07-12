@@ -32,10 +32,6 @@ func (a *fakeAgent) StartSession(ctx context.Context, sessionKey string, project
 	a.mu.Unlock()
 	return &fakeSession{reply: a.reply, attachments: a.attachments, project: project, delay: delay}, nil
 }
-func (a *fakeAgent) ListSessions(ctx context.Context) ([]SessionInfo, error) {
-	return []SessionInfo{}, nil
-}
-
 func (a *fakeAgent) Started() int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -366,46 +362,6 @@ func TestEngineAgentCommand(t *testing.T) {
 	}
 	if replies[len(replies)-1] != "claude-reply:hello" {
 		t.Fatalf("last reply = %q, want claude-reply:hello", replies[len(replies)-1])
-	}
-}
-
-func TestEngineListCommand(t *testing.T) {
-	eng, _ := newTestEngine("fake")
-	p := &fakePlatform{name: "fake"}
-	eng.AddPlatform(p)
-
-	go func() {
-		for p.getHandler() == nil {
-			time.Sleep(5 * time.Millisecond)
-		}
-		p.getHandler()(p, &Message{
-			SessionKey: "fake:u1",
-			Platform:   "fake",
-			UserID:     "u1",
-			Content:    "/list",
-			ReplyCtx:   "ctx",
-		})
-	}()
-
-	done := make(chan struct{})
-	go func() {
-		_ = eng.Run()
-		close(done)
-	}()
-
-	time.Sleep(100 * time.Millisecond)
-	_ = eng.Stop()
-	<-done
-
-	p.mu.Lock()
-	replies := append([]string(nil), p.replies...)
-	p.mu.Unlock()
-
-	if len(replies) != 1 {
-		t.Fatalf("got %d replies, want 1", len(replies))
-	}
-	if !strings.Contains(replies[0], "Agent fake 的 sessions") {
-		t.Fatalf("list reply = %q", replies[0])
 	}
 }
 

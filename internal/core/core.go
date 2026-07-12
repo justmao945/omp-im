@@ -32,8 +32,6 @@ type Agent interface {
 	Name() string
 	// StartSession creates a session for the given conversation key and project.
 	StartSession(ctx context.Context, sessionKey string, project Project) (AgentSession, error)
-	// ListSessions returns active sessions managed by this agent.
-	ListSessions(ctx context.Context) ([]SessionInfo, error)
 	Stop() error
 }
 
@@ -67,14 +65,6 @@ type AgentSession interface {
 	// History returns the conversation context retained by the session.
 	History() []HistoryEntry
 	Close() error
-}
-
-// SessionInfo describes an active agent session for /list.
-type SessionInfo struct {
-	SessionKey   string
-	Project      string
-	Status       string
-	LastActivity time.Time
 }
 
 // ImageSender is implemented by platforms that can send images.
