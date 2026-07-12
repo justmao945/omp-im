@@ -155,8 +155,8 @@ func (p *Platform) isAllowed(msg *inboundMessage) bool {
 func (p *Platform) Ping() error {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if p.wsClient.currentConn() != nil {
-			return p.wsClient.ping()
+		if conn := p.wsClient.currentConn(); conn != nil {
+			return p.wsClient.ping(conn)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}

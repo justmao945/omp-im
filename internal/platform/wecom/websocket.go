@@ -24,14 +24,12 @@ const (
 
 // wsClient manages a WebSocket connection to the WeCom AI bot gateway.
 type wsClient struct {
-	cfg        *config
+	cfg         *config
 	recvHandler func(*wsFrame)
 
-	conn      *websocket.Conn
-	connMu    sync.RWMutex
-	stopCh    chan struct{}
-	wg        sync.WaitGroup
-	connected bool
+	conn     *websocket.Conn
+	connMu   sync.RWMutex
+	stopCh   chan struct{}
 
 	// sendFn is used in tests to stub outbound sends.
 	sendFn func(map[string]interface{}) error
@@ -58,8 +56,12 @@ func (c *wsClient) run(ctx context.Context) error {
 		}
 
 		slog.Info("wecom: connecting to websocket", "url", c.cfg.websocketURL, "attempt", attempt+1)
+		start := time.Now()
 		if err := c.connectAndServe(ctx); err != nil {
 			slog.Error("wecom: websocket connection error", "error", err, "attempt", attempt+1)
+		}
+		if time.Since(start) > 30*time.Second {
+			reconnectDelay = defaultReconnectDelay
 		}
 
 		if attempt >= maxReconnectAttempts {
@@ -98,7 +100,6 @@ func (c *wsClient) connectAndServe(ctx context.Context) error {
 
 	c.connMu.Lock()
 	c.conn = conn
-	c.connected = true
 	c.connMu.Unlock()
 
 	if err := c.subscribe(conn); err != nil {
@@ -107,10 +108,30 @@ func (c *wsClient) connectAndServe(ctx context.Context) error {
 		return fmt.Errorf("subscribe: %w", err)
 	}
 
-	c.wg.Add(2)
-	go c.readLoop()
-	go c.heartbeatLoop()
-	return nil
+	connDone := make(chan struct{})
+	var localWg sync.WaitGroup
+	localWg.Add(2)
+	go func() {
+		defer localWg.Done()
+		c.readLoop(conn, connDone)
+	}()
+	go func() {
+		defer localWg.Done()
+		c.heartbeatLoop(conn, connDone)
+	}()
+
+	select {
+	case <-c.stopCh:
+		conn.Close()
+		localWg.Wait()
+		c.clearConn()
+		return nil
+	case <-connDone:
+		// readLoop exited; heartbeatLoop will exit once its next tick or ping fails.
+		localWg.Wait()
+		c.clearConn()
+		return fmt.Errorf("connection closed")
+	}
 }
 
 func (c *wsClient) subscribe(conn *websocket.Conn) error {
@@ -142,19 +163,14 @@ func (c *wsClient) subscribe(conn *websocket.Conn) error {
 	return nil
 }
 
-func (c *wsClient) readLoop() {
-	defer c.wg.Done()
+func (c *wsClient) readLoop(conn *websocket.Conn, done chan<- struct{}) {
+	defer close(done)
 
 	for {
 		select {
 		case <-c.stopCh:
 			return
 		default:
-		}
-
-		conn := c.currentConn()
-		if conn == nil {
-			return
 		}
 
 		var frame wsFrame
@@ -180,8 +196,13 @@ func (c *wsClient) readLoop() {
 	}
 }
 
-func (c *wsClient) heartbeatLoop() {
-	defer c.wg.Done()
+func (c *wsClient) heartbeatLoop(conn *websocket.Conn, done <-chan struct{}) {
+	defer func() {
+		// Ensure the connection is closed if the heartbeat loop exits, so the
+		// readLoop and connectAndServe notice and clean up.
+		conn.Close()
+	}()
+
 	ticker := time.NewTicker(defaultHeartbeatInterval)
 	defer ticker.Stop()
 
@@ -189,19 +210,18 @@ func (c *wsClient) heartbeatLoop() {
 		select {
 		case <-c.stopCh:
 			return
+		case <-done:
+			return
 		case <-ticker.C:
-			if err := c.ping(); err != nil {
+			if err := c.ping(conn); err != nil {
 				slog.Debug("wecom: ping failed", "error", err)
+				return
 			}
 		}
 	}
 }
 
-func (c *wsClient) ping() error {
-	conn := c.currentConn()
-	if conn == nil {
-		return fmt.Errorf("not connected")
-	}
+func (c *wsClient) ping(conn *websocket.Conn) error {
 	frame := map[string]interface{}{
 		"cmd": wsCmdPing,
 		"headers": map[string]string{
@@ -241,17 +261,14 @@ func (c *wsClient) clearConn() {
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
 	c.conn = nil
-	c.connected = false
 }
 
-// stop closes the websocket connection and waits for goroutines to finish.
+// stop closes the websocket connection and signals the run loop to exit.
 func (c *wsClient) stop() error {
 	close(c.stopCh)
 	if conn := c.currentConn(); conn != nil {
 		conn.Close()
 	}
-	c.wg.Wait()
-	c.clearConn()
 	return nil
 }
 
