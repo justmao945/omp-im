@@ -5,10 +5,11 @@ IM connector for local AI agents. Currently supports Weixin (personal) via the i
 ## Run
 
 ```bash
-cp config.example.json config.json
-# 1. Configure projects with work_dir.
-# 2. For Weixin, leave platforms[0].options.token empty to login via QR code.
-go run ./cmd/omp-im -config config.json
+# Config is loaded from ~/.omp-im/config.json by default.
+mkdir -p ~/.omp-im
+cp config.example.json ~/.omp-im/config.json
+# Edit projects and optionally set Weixin token, then run.
+go run ./cmd/omp-im
 ```
 
 All working data is stored under `~/.omp-im`.

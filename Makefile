@@ -7,7 +7,7 @@ test:
 	go test ./...
 
 run: build
-	./omp-im -config config.json
+	./omp-im -config ~/.omp-im/config.json
 
 clean:
 	rm -f omp-im
