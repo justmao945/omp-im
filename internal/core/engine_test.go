@@ -10,12 +10,13 @@ import (
 )
 
 type fakeAgent struct {
-	name        string
-	reply       string
-	attachments []OutboundAttachment
-	err         error
-	started     int
-	mu          sync.Mutex
+	name         string
+	reply        string
+	attachments  []OutboundAttachment
+	err          error
+	started      int
+	mu           sync.Mutex
+	respondDelay time.Duration
 }
 
 func (a *fakeAgent) Name() string { return a.name }
@@ -26,8 +27,9 @@ func (a *fakeAgent) StartSession(ctx context.Context, sessionKey string, project
 	}
 	a.mu.Lock()
 	a.started++
+	delay := a.respondDelay
 	a.mu.Unlock()
-	return &fakeSession{reply: a.reply, attachments: a.attachments, project: project}, nil
+	return &fakeSession{reply: a.reply, attachments: a.attachments, project: project, delay: delay}, nil
 }
 func (a *fakeAgent) ListSessions(ctx context.Context) ([]SessionInfo, error) {
 	return []SessionInfo{}, nil
@@ -44,9 +46,17 @@ type fakeSession struct {
 	attachments []OutboundAttachment
 	project     Project
 	closed      bool
+	delay       time.Duration
 }
 
 func (s *fakeSession) Respond(ctx context.Context, prompt string, images []ImageAttachment) (string, []OutboundAttachment, error) {
+	if s.delay > 0 {
+		select {
+		case <-ctx.Done():
+			return "", nil, ctx.Err()
+		case <-time.After(s.delay):
+		}
+	}
 	return s.reply + ":" + prompt, s.attachments, nil
 }
 func (s *fakeSession) Close() error {
@@ -400,6 +410,58 @@ func TestEngineUnknownCommand(t *testing.T) {
 	p.mu.Unlock()
 
 	if len(replies) != 1 || !strings.Contains(replies[0], "未知命令") {
+		t.Fatalf("replies = %v", replies)
+	}
+}
+
+func TestEngineEscCommand(t *testing.T) {
+	a1 := &fakeAgent{name: "slow", reply: "slow-reply", respondDelay: 10 * time.Second}
+	eng := NewEngine(
+		map[string]Agent{"slow": a1},
+		"slow",
+		map[string]Project{"default": {Name: "default", WorkDir: "/tmp"}},
+		"default",
+	)
+	p := &fakePlatform{name: "fake"}
+	eng.AddPlatform(p)
+
+	go func() {
+		for p.getHandler() == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+		// Send a long-running message, then immediately send /esc to cancel it.
+		go p.getHandler()(p, &Message{
+			SessionKey: "fake:u1",
+			Platform:   "fake",
+			UserID:     "u1",
+			Content:    "please wait",
+			ReplyCtx:   "ctx",
+		})
+		time.Sleep(50 * time.Millisecond)
+		p.getHandler()(p, &Message{
+			SessionKey: "fake:u1",
+			Platform:   "fake",
+			UserID:     "u1",
+			Content:    "/esc",
+			ReplyCtx:   "ctx",
+		})
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		_ = eng.Run()
+		close(done)
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	_ = eng.Stop()
+	<-done
+
+	p.mu.Lock()
+	replies := append([]string(nil), p.replies...)
+	p.mu.Unlock()
+
+	if len(replies) != 1 || !strings.Contains(replies[0], "已中断") {
 		t.Fatalf("replies = %v", replies)
 	}
 }

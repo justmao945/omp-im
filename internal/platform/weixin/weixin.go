@@ -388,11 +388,16 @@ func (p *Platform) pollLoop(ctx context.Context) {
 			continue
 		}
 
-		// Process messages sequentially so concurrent messages from the same
-		// user are handled (and replied to) in order. Throughput for a single
-		// account is not a concern.
 		for i := range resp.Msgs {
-			p.dispatchInbound(ctx, &resp.Msgs[i], h)
+			m := &resp.Msgs[i]
+			// /esc is an interrupt command and should be able to cancel a turn
+			// that is already running. Dispatch it concurrently; normal messages
+			// are still handled sequentially to preserve reply order.
+			if strings.TrimSpace(bodyFromItemList(m.ItemList)) == "/esc" {
+				go p.dispatchInbound(ctx, m, h)
+			} else {
+				p.dispatchInbound(ctx, m, h)
+			}
 		}
 
 		if ctx.Err() == nil && resp.GetUpdatesBuf != "" {

@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -23,6 +24,9 @@ type Engine struct {
 
 	sessions   map[string]*sessionEntry
 	sessionsMu sync.Mutex
+
+	activeTurns   map[string]context.CancelFunc
+	activeTurnsMu sync.Mutex
 
 	// MaxHistoryTurns limits how many user/assistant exchanges are kept
 	// in a session's implicit context. 0 means unlimited.
@@ -49,6 +53,7 @@ func NewEngine(agents map[string]Agent, defaultAgent string, projects map[string
 		ctx:             ctx,
 		cancel:          cancel,
 		sessions:        make(map[string]*sessionEntry),
+		activeTurns:     make(map[string]context.CancelFunc),
 		MaxHistoryTurns: 20,
 	}
 }
@@ -128,9 +133,22 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 	}
 
 	e.setSessionStatus(msg.SessionKey, "busy")
+	e.activeTurnsMu.Lock()
+	e.activeTurns[msg.SessionKey] = cancel
+	e.activeTurnsMu.Unlock()
+
 	reply, attachments, err := session.Respond(ctx, msg.Content, msg.Images)
+
+	e.activeTurnsMu.Lock()
+	delete(e.activeTurns, msg.SessionKey)
+	e.activeTurnsMu.Unlock()
+
 	e.setSessionStatus(msg.SessionKey, "idle")
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			// The turn was cancelled by /esc or shutdown; do not send an error reply.
+			return
+		}
 		slog.Error("agent respond error", "session", msg.SessionKey, "error", err)
 		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("处理失败: %v", err))
 		return
@@ -265,6 +283,8 @@ func (e *Engine) handleCommand(ctx context.Context, p Platform, msg *Message, cm
 		e.handleListCommand(ctx, p, msg)
 	case "help", "?":
 		e.handleHelpCommand(ctx, p, msg)
+	case "esc":
+		e.handleEscCommand(ctx, p, msg)
 	default:
 		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("未知命令: /%s", cmd.name))
 	}
@@ -348,7 +368,20 @@ func (e *Engine) handleHelpCommand(ctx context.Context, p Platform, msg *Message
 /proj — 显示当前 project 和可用 projects
 /proj <name> — 切换到指定 project
 /list — 列出当前 agent 的 active sessions
+/esc — 中断当前正在生成的回复
 /help, /? — 显示本帮助`)
+}
+
+func (e *Engine) handleEscCommand(ctx context.Context, p Platform, msg *Message) {
+	e.activeTurnsMu.Lock()
+	cancel, ok := e.activeTurns[msg.SessionKey]
+	e.activeTurnsMu.Unlock()
+	if ok {
+		cancel()
+		_ = p.Reply(ctx, msg.ReplyCtx, "已中断当前回复")
+		return
+	}
+	_ = p.Reply(ctx, msg.ReplyCtx, "当前没有正在生成的回复")
 }
 
 func (e *Engine) sessionAgent(sessionKey string) string {
