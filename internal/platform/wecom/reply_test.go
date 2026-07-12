@@ -53,7 +53,7 @@ func TestBuildStreamContent(t *testing.T) {
 			setup: func(rc *replyContext) {
 				rc.turnStart = time.Now().Add(-3 * time.Second)
 			},
-			wantContains: []string{"Processing", "3s"},
+			wantContains: []string{"Working", "3s"},
 		},
 		{
 			name:     "processing hidden when body arrives",
@@ -157,13 +157,13 @@ func TestBuildStreamContent(t *testing.T) {
 			},
 			wantContains: []string{
 				"result text",
-				"thinking",
-				"2 tools",
+				"[⏱️ 10s]",
+				"🤔 thinking",
+				"🔧 2 tools",
 				"5s",
-				"total",
-				"10s",
-				"context usage 26%",
+				"🧠 context usage 26%",
 			},
+			wantNotContain: "total",
 		},
 		{
 			name:     "finish footer",
@@ -180,12 +180,12 @@ func TestBuildStreamContent(t *testing.T) {
 			},
 			wantContains: []string{
 				"result text",
-				"thinking",
-				"2 tools",
+				"[⏱️ 10s]",
+				"🤔 thinking",
+				"🔧 2 tools",
 				"5s",
-				"total",
-				"10s",
 			},
+			wantNotContain: "total",
 		},
 		{
 			name:     "detailed tool footer summary only",
@@ -206,7 +206,7 @@ func TestBuildStreamContent(t *testing.T) {
 					end:    time.Now().Add(-2 * time.Second),
 				}}
 			},
-			wantContains:   []string{"result", "1 tool", "3s"},
+			wantContains:   []string{"result", "[⏱️ 10s]", "🔧 1 tool", "3s"},
 			wantNotContain: "root:x",
 		},
 	}
@@ -249,7 +249,7 @@ func TestStreamFooter(t *testing.T) {
 				rc.toolTotalDuration = 5 * time.Second
 				rc.turnEnd = time.Now()
 			},
-			wantContains: []string{"thinking", "2 tools", "5s", "total", "10s"},
+			wantContains: []string{"[⏱️ 10s]", "🤔 thinking", "🔧 2 tools", "5s"},
 		},
 		{
 			name:     "tool off hides tool summary",
@@ -282,7 +282,7 @@ func TestStreamFooter(t *testing.T) {
 					end:    time.Now().Add(-2 * time.Second),
 				}}
 			},
-			wantContains:   []string{"1 tool", "3s", "total", "10s"},
+			wantContains:   []string{"[⏱️ 10s]", "🔧 1 tool", "3s"},
 			wantNotContain: "root:x",
 		},
 	}
