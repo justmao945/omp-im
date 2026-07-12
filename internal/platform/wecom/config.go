@@ -12,7 +12,7 @@ type config struct {
 	websocketURL   string
 	allowFrom      string
 	groupAllowFrom string
-	thinkingLevel  string // "concise", "detailed", or "off"
+	thinkingDisplay string // "concise", "detailed", or "off"
 }
 
 func parseConfig(opts map[string]any) (*config, error) {
@@ -29,15 +29,15 @@ func parseConfig(opts map[string]any) (*config, error) {
 
 	allowFrom, _ := opts["allow_from"].(string)
 	groupAllowFrom, _ := opts["group_allow_from"].(string)
-	thinkingLevel, _ := opts["thinking_level"].(string)
-	thinkingLevel = strings.ToLower(strings.TrimSpace(thinkingLevel))
-	if thinkingLevel == "" {
-		thinkingLevel = "concise"
+	thinkingDisplay, _ := opts["thinking_display"].(string)
+	thinkingDisplay = strings.ToLower(strings.TrimSpace(thinkingDisplay))
+	if thinkingDisplay == "" {
+		thinkingDisplay = "concise"
 	}
-	switch thinkingLevel {
+	switch thinkingDisplay {
 	case "concise", "detailed", "off":
 	default:
-		return nil, fmt.Errorf("wecom: thinking_level must be concise, detailed, or off")
+		return nil, fmt.Errorf("wecom: thinking_display must be concise, detailed, or off")
 	}
 
 	return &config{
@@ -46,7 +46,7 @@ func parseConfig(opts map[string]any) (*config, error) {
 		websocketURL:   strings.TrimSpace(websocketURL),
 		allowFrom:      strings.TrimSpace(allowFrom),
 		groupAllowFrom: strings.TrimSpace(groupAllowFrom),
-		thinkingLevel:  thinkingLevel,
+		thinkingDisplay: thinkingDisplay,
 	}, nil
 }
 

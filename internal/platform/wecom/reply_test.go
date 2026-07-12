@@ -4,8 +4,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/justmao945/omp-im/internal/core"
 )
 
 func TestSplitTextChunks(t *testing.T) {
@@ -41,15 +39,15 @@ func TestSplitTextChunks(t *testing.T) {
 func TestBuildStreamContent(t *testing.T) {
 	cases := []struct {
 		name           string
-		level          string
+		display        string
 		finished       bool
 		setup          func(*replyContext)
 		wantContains   []string
 		wantNotContain string
 	}{
 		{
-			name:  "concise thinking",
-			level: "concise",
+			name:    "concise thinking",
+			display: "concise",
 			setup: func(rc *replyContext) {
 				rc.thinkingText = "analyzing"
 				rc.turnStart = time.Now().Add(-time.Second)
@@ -57,8 +55,8 @@ func TestBuildStreamContent(t *testing.T) {
 			wantContains: []string{"thinking", "1s"},
 		},
 		{
-			name:  "detailed thinking",
-			level: "detailed",
+			name:    "detailed thinking",
+			display: "detailed",
 			setup: func(rc *replyContext) {
 				rc.thinkingText = "analyzing"
 			},
@@ -66,16 +64,16 @@ func TestBuildStreamContent(t *testing.T) {
 			wantNotContain: "thinking",
 		},
 		{
-			name:  "thinking off",
-			level: "off",
+			name:    "thinking off",
+			display: "off",
 			setup: func(rc *replyContext) {
 				rc.thinkingText = "analyzing"
 			},
 			wantNotContain: "thinking",
 		},
 		{
-			name:  "tool running",
-			level: "concise",
+			name:    "tool running",
+			display: "concise",
 			setup: func(rc *replyContext) {
 				rc.toolName = "git status"
 				rc.toolStart = time.Now().Add(-2 * time.Second)
@@ -83,23 +81,36 @@ func TestBuildStreamContent(t *testing.T) {
 			wantContains: []string{"git status", "2s"},
 		},
 		{
-			name:  "tool result flash",
-			level: "concise",
+			name:    "status hidden when body arrives",
+			display: "concise",
 			setup: func(rc *replyContext) {
-				rc.toolResult = "done"
+				rc.thinkingText = "analyzing"
+				rc.toolName = "git status"
+				rc.streamText = "body text"
 			},
-			wantContains: []string{"done"},
+			wantContains:   []string{"body text"},
+			wantNotContain: "git status",
 		},
 		{
-			name:     "finish summary",
-			level:    "concise",
+			name:     "finish footer",
+			display:  "concise",
 			finished: true,
 			setup: func(rc *replyContext) {
+				rc.turnStart = time.Now().Add(-10 * time.Second)
+				rc.thinkingEnd = time.Now().Add(-8 * time.Second)
 				rc.toolCount = 2
 				rc.toolTotalDuration = 5 * time.Second
+				rc.turnEnd = time.Now()
 				rc.streamText = "result text"
 			},
-			wantContains: []string{"result text", "used 2 tools", "5s"},
+			wantContains: []string{
+				"result text",
+				"thinking",
+				"2 tools",
+				"5s",
+				"total",
+				"10s",
+			},
 		},
 	}
 	for _, tc := range cases {
@@ -108,7 +119,7 @@ func TestBuildStreamContent(t *testing.T) {
 			if tc.setup != nil {
 				tc.setup(rc)
 			}
-			got := buildStreamContent(rc, tc.level, tc.finished)
+			got := buildStreamContent(rc, tc.display, tc.finished)
 			for _, want := range tc.wantContains {
 				if !strings.Contains(got, want) {
 					t.Fatalf("content missing %q:\n%s", want, got)
@@ -121,48 +132,19 @@ func TestBuildStreamContent(t *testing.T) {
 	}
 }
 
-func TestStreamEventUpdatesState(t *testing.T) {
-	rc := &replyContext{}
-	updateStreamEvent(rc, core.StreamEvent{Type: "thinking", Text: "step 1"})
-	if !strings.Contains(rc.thinkingText, "step 1") {
-		t.Fatalf("thinking text not accumulated")
+func TestStreamFooter(t *testing.T) {
+	rc := &replyContext{
+		turnStart:         time.Now().Add(-10 * time.Second),
+		thinkingEnd:       time.Now().Add(-8 * time.Second),
+		toolCount:         2,
+		toolTotalDuration: 5 * time.Second,
+		turnEnd:           time.Now(),
 	}
-
-	updateStreamEvent(rc, core.StreamEvent{Type: "tool_start", Tool: "ls"})
-	if rc.toolName != "ls" {
-		t.Fatalf("toolName = %q", rc.toolName)
-	}
-
-	updateStreamEvent(rc, core.StreamEvent{Type: "tool_end", Result: "ok"})
-	if rc.toolCount != 1 {
-		t.Fatalf("toolCount = %d", rc.toolCount)
-	}
-	if rc.toolResult != "ok" {
-		t.Fatalf("toolResult = %q", rc.toolResult)
-	}
-	if rc.toolName != "" {
-		t.Fatalf("toolName should be cleared")
-	}
-}
-
-func updateStreamEvent(rc *replyContext, ev core.StreamEvent) {
-	switch ev.Type {
-	case "thinking":
-		rc.thinkingText += ev.Text
-	case "tool_start":
-		rc.toolName = ev.Tool
-		rc.toolStart = time.Now()
-	case "tool_end":
-		if !rc.toolStart.IsZero() {
-			rc.toolTotalDuration += time.Since(rc.toolStart)
+	footer := buildStreamFooter(rc)
+	for _, want := range []string{"thinking", "2 tools", "5s", "total", "10s"} {
+		if !strings.Contains(footer, want) {
+			t.Fatalf("footer missing %q:\n%s", want, footer)
 		}
-		rc.toolCount++
-		rc.toolResult = ev.Result
-		if rc.toolResult == "" {
-			rc.toolResult = "done"
-		}
-		rc.toolName = ""
-		rc.toolStart = time.Time{}
 	}
 }
 

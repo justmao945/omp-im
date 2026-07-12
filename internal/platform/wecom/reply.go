@@ -62,6 +62,10 @@ func (p *Platform) StreamReply(ctx context.Context, replyCtx any, delta string, 
 		}
 	}
 
+	if rc.thinkingText != "" && rc.thinkingEnd.IsZero() {
+		rc.thinkingEnd = time.Now()
+	}
+
 	// ACP chunks are deltas, but the WeCom stream protocol expects each frame
 	// to contain the full message content so far (refresh mode). Detect if the
 	// agent already sent cumulative text and fall back to appending raw deltas.
@@ -97,18 +101,16 @@ func (p *Platform) StreamEvent(ctx context.Context, replyCtx any, ev core.Stream
 	case "thinking":
 		rc.thinkingText += ev.Text
 	case "tool_start":
+		if rc.thinkingText != "" && rc.thinkingEnd.IsZero() {
+			rc.thinkingEnd = time.Now()
+		}
 		rc.toolName = ev.Tool
 		rc.toolStart = time.Now()
-		rc.toolResult = ""
 	case "tool_end":
 		if !rc.toolStart.IsZero() {
 			rc.toolTotalDuration += time.Since(rc.toolStart)
 		}
 		rc.toolCount++
-		rc.toolResult = ev.Result
-		if rc.toolResult == "" {
-			rc.toolResult = "done"
-		}
 		rc.toolName = ""
 		rc.toolStart = time.Time{}
 	}
@@ -121,8 +123,11 @@ func (p *Platform) renderStream(ctx context.Context, rc *replyContext, finished 
 	if rc.streamID == "" {
 		rc.streamID = generateReqID()
 	}
+	if finished {
+		rc.turnEnd = time.Now()
+	}
 
-	content := buildStreamContent(rc, p.cfg.thinkingLevel, finished)
+	content := buildStreamContent(rc, p.cfg.thinkingDisplay, finished)
 	body := map[string]interface{}{
 		"msgtype": "stream",
 		"stream": map[string]interface{}{
@@ -147,44 +152,67 @@ func (p *Platform) renderStream(ctx context.Context, rc *replyContext, finished 
 	return nil
 }
 
-// buildStreamContent assembles the visible text with optional thinking/tool status.
-func buildStreamContent(rc *replyContext, thinkingLevel string, finished bool) string {
+// buildStreamContent assembles the visible text with optional status line and footer.
+// Once the body text starts, the status line is hidden and replaced by the body.
+func buildStreamContent(rc *replyContext, thinkingDisplay string, finished bool) string {
 	var parts []string
 
-	// 1. Thinking / tool status line
-	switch {
-	case rc.toolName != "":
-		elapsed := ""
-		if !rc.toolStart.IsZero() {
-			elapsed = fmt.Sprintf(" %s", formatDuration(time.Since(rc.toolStart)))
-		}
-		parts = append(parts, fmt.Sprintf("🔧 %s%s", rc.toolName, elapsed))
-	case rc.toolResult != "" && !finished:
-		// brief result flash before next update
-		parts = append(parts, fmt.Sprintf("✅ %s", rc.toolResult))
-	case rc.thinkingText != "" && thinkingLevel != "off":
-		if thinkingLevel == "detailed" {
-			parts = append(parts, rc.thinkingText)
-		} else {
+	if rc.streamText == "" {
+		// Status line: only shown while no body text has arrived yet.
+		switch {
+		case rc.toolName != "":
 			elapsed := ""
-			if !rc.turnStart.IsZero() {
-				elapsed = fmt.Sprintf(" %s", formatDuration(time.Since(rc.turnStart)))
+			if !rc.toolStart.IsZero() {
+				elapsed = fmt.Sprintf(" %s", formatDuration(time.Since(rc.toolStart)))
 			}
-			parts = append(parts, fmt.Sprintf("🤔 thinking%s...", elapsed))
+			parts = append(parts, fmt.Sprintf("🔧 %s%s", rc.toolName, elapsed))
+		case rc.thinkingText != "" && thinkingDisplay != "off":
+			if thinkingDisplay == "detailed" {
+				parts = append(parts, rc.thinkingText)
+			} else {
+				elapsed := ""
+				if !rc.turnStart.IsZero() {
+					elapsed = fmt.Sprintf(" %s", formatDuration(time.Since(rc.turnStart)))
+				}
+				parts = append(parts, fmt.Sprintf("🤔 thinking%s", elapsed))
+			}
 		}
-	}
-
-	// 2. Visible text
-	if rc.streamText != "" {
+	} else {
+		// Body text has arrived; show it instead of the status line.
 		parts = append(parts, rc.streamText)
 	}
 
-	// 3. Tool summary at finish
-	if finished && rc.toolCount > 0 {
-		parts = append(parts, fmt.Sprintf("(used %d tool%s in %s)", rc.toolCount, plural(rc.toolCount), formatDuration(rc.toolTotalDuration)))
+	// Footer at the end of the turn.
+	if finished {
+		if footer := buildStreamFooter(rc); footer != "" {
+			parts = append(parts, footer)
+		}
 	}
 
 	return strings.Join(parts, "\n\n")
+}
+
+// buildStreamFooter builds the summary footer shown at the end of a turn.
+func buildStreamFooter(rc *replyContext) string {
+	var items []string
+
+	hasThinking := !rc.thinkingEnd.IsZero() && rc.thinkingEnd.After(rc.turnStart)
+	if hasThinking {
+		items = append(items, fmt.Sprintf("thinking %s", formatDuration(rc.thinkingEnd.Sub(rc.turnStart))))
+	}
+	if rc.toolCount > 0 {
+		items = append(items, fmt.Sprintf("%d tool%s %s", rc.toolCount, plural(rc.toolCount), formatDuration(rc.toolTotalDuration)))
+	}
+	if len(items) == 0 {
+		return ""
+	}
+	if !rc.turnEnd.IsZero() && rc.turnEnd.After(rc.turnStart) {
+		items = append(items, fmt.Sprintf("total %s", formatDuration(rc.turnEnd.Sub(rc.turnStart))))
+	} else if !rc.turnStart.IsZero() {
+		items = append(items, fmt.Sprintf("total %s", formatDuration(time.Since(rc.turnStart))))
+	}
+
+	return "> " + strings.Join(items, " · ")
 }
 
 // formatDuration returns a concise human-readable duration (e.g. "1.2s", "3ms").

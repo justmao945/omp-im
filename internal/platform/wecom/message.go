@@ -52,12 +52,13 @@ type replyContext struct {
 
 	// streaming state
 	thinkingText     string
+	thinkingEnd      time.Time
 	toolName         string
 	toolStart        time.Time
-	toolResult       string
 	toolCount        int
 	toolTotalDuration time.Duration
 	turnStart        time.Time
+	turnEnd          time.Time
 }
 
 // wsFrame is the top-level envelope received over the WebSocket.
