@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
-
-	qrcode "github.com/skip2/go-qrcode"
 )
 
 const (
@@ -101,8 +101,8 @@ func hasUsableSession(path string) bool {
 	return strings.TrimSpace(state.BotToken) != ""
 }
 
-// performQRLogin fetches a QR code, saves it as a PNG file, polls for scan
-// confirmation, and persists the resulting session token.
+// performQRLogin fetches a QR code from iLink, saves it as a PNG file, opens
+// the image so the user can scan it, and polls for scan confirmation.
 func performQRLogin(ctx context.Context, client *apiClient, stateDir string) (*sessionState, error) {
 	qrResp, err := client.fetchLoginQRCode(ctx, defaultBotType)
 	if err != nil {
@@ -114,19 +114,17 @@ func performQRLogin(ctx context.Context, client *apiClient, stateDir string) (*s
 
 	qrFile := filepath.Join(stateDir, defaultQRFileName)
 	if err := saveQRCodeImage(qrFile, qrResp.QRCodeImgContent); err != nil {
-		slog.Warn("weixin: failed to save QR code image", "error", err)
+		return nil, fmt.Errorf("weixin: failed to save QR code image: %w", err)
 	}
 
 	fmt.Printf("\n=================================================\n")
-	fmt.Printf("请用微信扫描下方二维码登录（或打开图片 %s）：\n", qrFile)
+	fmt.Printf("请用微信扫描图片 %s 登录\n", qrFile)
 	fmt.Printf("=================================================\n\n")
 
-	qr, err := qrcode.New(qrResp.QRCode, qrcode.Low)
-	if err == nil {
-		fmt.Println(qr.ToSmallString(false))
-		fmt.Println()
+	if tryOpenImage(qrFile) {
+		fmt.Println("已自动打开二维码图片，请用微信扫描。")
 	} else {
-		fmt.Printf("  内容: %s\n\n", qrResp.QRCode)
+		fmt.Println("请手动打开上面的图片文件，用微信扫描。")
 	}
 
 	slog.Info("weixin: waiting for QR code scan", "deadline", qrLoginDeadline)
@@ -145,6 +143,35 @@ func performQRLogin(ctx context.Context, client *apiClient, stateDir string) (*s
 	}
 	slog.Info("weixin: login successful", "bot_id", state.BotID, "user_id", state.UserID)
 	return state, nil
+}
+
+// tryOpenImage attempts to open the QR image with the system's default image viewer.
+func tryOpenImage(path string) bool {
+	var cmd string
+	var args []string
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = "open"
+		args = []string{path}
+	case "linux":
+		cmd = "xdg-open"
+		args = []string{path}
+	case "windows":
+		cmd = "cmd"
+		args = []string{"/c", "start", path}
+	default:
+		return false
+	}
+	if _, err := exec.LookPath(cmd); err != nil {
+		return false
+	}
+	c := exec.Command(cmd, args...)
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	if err := c.Start(); err != nil {
+		return false
+	}
+	return true
 }
 
 func waitForQRLogin(ctx context.Context, client *apiClient, qrcodeContent string) (*qrStatusResponse, error) {
