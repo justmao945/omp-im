@@ -3,6 +3,7 @@ package wecom
 import (
 	"log/slog"
 	"strings"
+	"time"
 )
 
 // inboundMessage represents a parsed message from the WeCom WebSocket gateway.
@@ -45,9 +46,18 @@ type replyContext struct {
 	chatid     string
 	chattype   string
 	reqID      string
-	aibotid    string // robot id, used to strip @-mentions in groups
-	streamID   string // reused across stream chunks for a single turn
-	streamText string // accumulated text for WeCom stream refresh mode
+	aibotid    string         // robot id, used to strip @-mentions in groups
+	streamID   string         // reused across stream chunks for a single turn
+	streamText string         // accumulated visible text for WeCom stream refresh mode
+
+	// streaming state
+	thinkingText     string
+	toolName         string
+	toolStart        time.Time
+	toolResult       string
+	toolCount        int
+	toolTotalDuration time.Duration
+	turnStart        time.Time
 }
 
 // wsFrame is the top-level envelope received over the WebSocket.

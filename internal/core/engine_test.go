@@ -59,7 +59,7 @@ func (s *fakeSession) SessionID() string {
 	return s.sessionID
 }
 
-func (s *fakeSession) Respond(ctx context.Context, prompt string, images []ImageAttachment, files []FileAttachment, onText func(string)) (string, []OutboundAttachment, error) {
+func (s *fakeSession) Respond(ctx context.Context, prompt string, images []ImageAttachment, files []FileAttachment, onEvent func(StreamEvent)) (string, []OutboundAttachment, error) {
 	if s.delay > 0 {
 		select {
 		case <-ctx.Done():

@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 	"unicode/utf8"
+
+	"github.com/justmao945/omp-im/internal/core"
 )
 
 // maxStreamContentBytes is the maximum content length for a single WeCom stream message.
@@ -54,6 +57,9 @@ func (p *Platform) StreamReply(ctx context.Context, replyCtx any, delta string, 
 	}
 	if rc.streamID == "" {
 		rc.streamID = generateReqID()
+		if rc.turnStart.IsZero() {
+			rc.turnStart = time.Now()
+		}
 	}
 
 	// ACP chunks are deltas, but the WeCom stream protocol expects each frame
@@ -67,14 +73,65 @@ func (p *Platform) StreamReply(ctx context.Context, replyCtx any, delta string, 
 		rc.streamText += delta
 	}
 
+	return p.renderStream(ctx, rc, finished)
+}
+
+// StreamEvent implements core.StreamReplyer. It handles non-text events such as
+// thinking and tool status updates and refreshes the stream message.
+func (p *Platform) StreamEvent(ctx context.Context, replyCtx any, ev core.StreamEvent) error {
+	rc, ok := replyCtx.(*replyContext)
+	if !ok {
+		return fmt.Errorf("wecom: invalid reply context")
+	}
+	if rc.chatid == "" {
+		return fmt.Errorf("wecom: chatid is empty")
+	}
+	if rc.streamID == "" {
+		rc.streamID = generateReqID()
+		if rc.turnStart.IsZero() {
+			rc.turnStart = time.Now()
+		}
+	}
+
+	switch ev.Type {
+	case "thinking":
+		rc.thinkingText += ev.Text
+	case "tool_start":
+		rc.toolName = ev.Tool
+		rc.toolStart = time.Now()
+		rc.toolResult = ""
+	case "tool_end":
+		if !rc.toolStart.IsZero() {
+			rc.toolTotalDuration += time.Since(rc.toolStart)
+		}
+		rc.toolCount++
+		rc.toolResult = ev.Result
+		if rc.toolResult == "" {
+			rc.toolResult = "done"
+		}
+		rc.toolName = ""
+		rc.toolStart = time.Time{}
+	}
+
+	return p.renderStream(ctx, rc, false)
+}
+
+// renderStream builds the current stream content and sends it to WeCom.
+func (p *Platform) renderStream(ctx context.Context, rc *replyContext, finished bool) error {
+	if rc.streamID == "" {
+		rc.streamID = generateReqID()
+	}
+
+	content := buildStreamContent(rc, p.cfg.thinkingLevel, finished)
 	body := map[string]interface{}{
 		"msgtype": "stream",
 		"stream": map[string]interface{}{
 			"id":      rc.streamID,
 			"finish":  finished,
-			"content": rc.streamText,
+			"content": content,
 		},
 	}
+
 	if rc.reqID != "" {
 		if err := p.respond(rc.reqID, body); err != nil {
 			return err
@@ -88,6 +145,67 @@ func (p *Platform) StreamReply(ctx context.Context, replyCtx any, delta string, 
 		slog.Debug("wecom: finished stream reply")
 	}
 	return nil
+}
+
+// buildStreamContent assembles the visible text with optional thinking/tool status.
+func buildStreamContent(rc *replyContext, thinkingLevel string, finished bool) string {
+	var parts []string
+
+	// 1. Thinking / tool status line
+	switch {
+	case rc.toolName != "":
+		elapsed := ""
+		if !rc.toolStart.IsZero() {
+			elapsed = fmt.Sprintf(" %s", formatDuration(time.Since(rc.toolStart)))
+		}
+		parts = append(parts, fmt.Sprintf("🔧 %s%s", rc.toolName, elapsed))
+	case rc.toolResult != "" && !finished:
+		// brief result flash before next update
+		parts = append(parts, fmt.Sprintf("✅ %s", rc.toolResult))
+	case rc.thinkingText != "" && thinkingLevel != "off":
+		if thinkingLevel == "detailed" {
+			parts = append(parts, rc.thinkingText)
+		} else {
+			elapsed := ""
+			if !rc.turnStart.IsZero() {
+				elapsed = fmt.Sprintf(" %s", formatDuration(time.Since(rc.turnStart)))
+			}
+			parts = append(parts, fmt.Sprintf("🤔 thinking%s...", elapsed))
+		}
+	}
+
+	// 2. Visible text
+	if rc.streamText != "" {
+		parts = append(parts, rc.streamText)
+	}
+
+	// 3. Tool summary at finish
+	if finished && rc.toolCount > 0 {
+		parts = append(parts, fmt.Sprintf("(used %d tool%s in %s)", rc.toolCount, plural(rc.toolCount), formatDuration(rc.toolTotalDuration)))
+	}
+
+	return strings.Join(parts, "\n\n")
+}
+
+// formatDuration returns a concise human-readable duration (e.g. "1.2s", "3ms").
+func formatDuration(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	if d < time.Millisecond {
+		return "0s"
+	}
+	if d < time.Second {
+		return d.Truncate(time.Millisecond).String()
+	}
+	return d.Truncate(10 * time.Millisecond).String()
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 // splitTextChunks splits text into chunks so each chunk is at most maxBytes bytes

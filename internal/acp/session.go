@@ -303,7 +303,7 @@ func (s *Session) SessionID() string {
 	return s.sessionID
 }
 
-func (s *Session) Respond(ctx context.Context, prompt string, images []core.ImageAttachment, files []core.FileAttachment, onText func(string)) (string, []core.OutboundAttachment, error) {
+func (s *Session) Respond(ctx context.Context, prompt string, images []core.ImageAttachment, files []core.FileAttachment, onEvent func(core.StreamEvent)) (string, []core.OutboundAttachment, error) {
 	if s.sessionID == "" {
 		return "", nil, fmt.Errorf("acp: no session id")
 	}
@@ -316,6 +316,12 @@ func (s *Session) Respond(ctx context.Context, prompt string, images []core.Imag
 	defer s.setStatus("idle")
 	s.startTurnStatus()
 	defer s.resetStatus()
+
+	emit := func(ev core.StreamEvent) {
+		if onEvent != nil {
+			onEvent(ev)
+		}
+	}
 
 	blocks := []any{map[string]any{"type": "text", "text": buildPromptWithFiles(prompt, files)}}
 	for _, img := range images {
@@ -341,12 +347,14 @@ func (s *Session) Respond(ctx context.Context, prompt string, images []core.Imag
 		case "session/update":
 			text := extractAgentText(params)
 			if text != "" {
-				if onText != nil {
-					onText(text)
-				}
+				emit(core.StreamEvent{Type: "text", Text: text, Status: s.Status()})
 				mu.Lock()
 				textParts = append(textParts, text)
 				mu.Unlock()
+			}
+			thinking := extractAgentThought(params)
+			if thinking != "" {
+				emit(core.StreamEvent{Type: "thinking", Text: thinking, Status: s.Status()})
 			}
 			if opts := extractConfigOptionUpdate(params); len(opts) > 0 {
 				s.setModelFromConfigOptions(opts)
@@ -361,9 +369,12 @@ func (s *Session) Respond(ctx context.Context, prompt string, images []core.Imag
 				}
 				slog.Info("acp: tool call started", "session", s.sessionKey, "kind", toolCallKind(params), "path", toolCallPath(params), "command", truncate(cmd, 200))
 				s.setToolStatus(true, cmd)
+				emit(core.StreamEvent{Type: "tool_start", Tool: cmd, Status: s.Status()})
 			}
 			if isToolCallCompleted(params) {
 				slog.Info("acp: tool call completed", "session", s.sessionKey)
+				path := toolCallPath(params)
+				emit(core.StreamEvent{Type: "tool_end", Tool: path, Status: s.Status()})
 				s.setToolStatus(false, "")
 			}
 			collectToolCall(params, toolCalls)
@@ -643,6 +654,31 @@ func extractAgentText(params json.RawMessage) string {
 		return ""
 	}
 	if head.SessionUpdate == "agent_message_chunk" && head.Content.Type == "text" {
+		return head.Content.Text
+	}
+	return ""
+}
+
+// extractAgentThought pulls assistant reasoning/thought text out of a session/update notification.
+func extractAgentThought(params json.RawMessage) string {
+	var wrap struct {
+		SessionID string          `json:"sessionId"`
+		Update    json.RawMessage `json:"update"`
+	}
+	if err := json.Unmarshal(params, &wrap); err != nil {
+		return ""
+	}
+	var head struct {
+		SessionUpdate string `json:"sessionUpdate"`
+		Content       struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(wrap.Update, &head); err != nil {
+		return ""
+	}
+	if head.SessionUpdate == "agent_thought_chunk" && head.Content.Type == "text" {
 		return head.Content.Text
 	}
 	return ""

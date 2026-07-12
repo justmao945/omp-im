@@ -14,10 +14,23 @@ type Project struct {
 	WorkDir string
 }
 
+// StreamEvent carries a single streaming update from an agent session.
+// Platforms can use it to render typing, thinking, and tool status.
+type StreamEvent struct {
+	Type   string      // "text", "thinking", "tool_start", "tool_end", "finish"
+	Text   string      // text or thinking content
+	Tool   string      // tool command/name
+	Result string      // one-line tool result summary
+	Status AgentStatus // snapshot when the event occurred
+}
+
+// StreamReplyer is implemented by platforms that can send incremental updates
+// during an agent turn, including text, thinking, and tool status.
 type StreamReplyer interface {
-	// StreamReply sends a streaming text delta to the user identified by replyCtx.
-	// finished is true when the assistant turn has ended and no more deltas follow.
+	// StreamReply sends a text delta or the final finish signal.
 	StreamReply(ctx context.Context, replyCtx any, delta string, finished bool) error
+	// StreamEvent handles non-text streaming events (thinking, tools).
+	StreamEvent(ctx context.Context, replyCtx any, event StreamEvent) error
 }
 
 // Platform abstracts a messaging platform (Weixin, WeCom, etc.).
@@ -68,8 +81,8 @@ type AgentStatus struct {
 type AgentSession interface {
 	// Respond sends the current conversation turn to the agent and returns
 	// the assistant's text reply along with any files/images the agent produced.
-	// onText is called for each streaming text delta; it may be nil.
-	Respond(ctx context.Context, prompt string, images []ImageAttachment, files []FileAttachment, onText func(string)) (string, []OutboundAttachment, error)
+	// onEvent is called for each streaming event; it may be nil.
+	Respond(ctx context.Context, prompt string, images []ImageAttachment, files []FileAttachment, onEvent func(StreamEvent)) (string, []OutboundAttachment, error)
 	// Status returns the current state of the session (idle, thinking, using_tools, etc.)
 	// along with turn timing and usage information.
 	Status() AgentStatus

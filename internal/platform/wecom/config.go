@@ -7,11 +7,12 @@ import (
 
 // config holds parsed options for the WeCom platform.
 type config struct {
-	botID        string
-	secret       string
-	websocketURL string
-	allowFrom    string
+	botID          string
+	secret         string
+	websocketURL   string
+	allowFrom      string
 	groupAllowFrom string
+	thinkingLevel  string // "concise", "detailed", or "off"
 }
 
 func parseConfig(opts map[string]any) (*config, error) {
@@ -28,6 +29,16 @@ func parseConfig(opts map[string]any) (*config, error) {
 
 	allowFrom, _ := opts["allow_from"].(string)
 	groupAllowFrom, _ := opts["group_allow_from"].(string)
+	thinkingLevel, _ := opts["thinking_level"].(string)
+	thinkingLevel = strings.ToLower(strings.TrimSpace(thinkingLevel))
+	if thinkingLevel == "" {
+		thinkingLevel = "concise"
+	}
+	switch thinkingLevel {
+	case "concise", "detailed", "off":
+	default:
+		return nil, fmt.Errorf("wecom: thinking_level must be concise, detailed, or off")
+	}
 
 	return &config{
 		botID:          strings.TrimSpace(botID),
@@ -35,6 +46,7 @@ func parseConfig(opts map[string]any) (*config, error) {
 		websocketURL:   strings.TrimSpace(websocketURL),
 		allowFrom:      strings.TrimSpace(allowFrom),
 		groupAllowFrom: strings.TrimSpace(groupAllowFrom),
+		thinkingLevel:  thinkingLevel,
 	}, nil
 }
 

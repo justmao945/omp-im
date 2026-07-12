@@ -144,6 +144,16 @@ func TestStatusSnapshotPreservesSessionFields(t *testing.T) {
 	}
 }
 
+func TestExtractAgentThought(t *testing.T) {
+	params := []byte(`{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"I should check the file first."}}}`)
+	if got := extractAgentThought(params); got != "I should check the file first." {
+		t.Fatalf("got %q, want %q", got, "I should check the file first.")
+	}
+	if got := extractAgentText(params); got != "" {
+		t.Fatalf("extractAgentText should not return thought text, got %q", got)
+	}
+}
+
 
 
 

@@ -278,12 +278,19 @@ func (e *Engine) processNormalMessage(ctx context.Context, cancel context.Cancel
 	var err error
 
 	if streamer, ok := p.(StreamReplyer); ok {
-		onText := func(delta string) {
-			if err := streamer.StreamReply(ctx, msg.ReplyCtx, delta, false); err != nil {
-				slog.Error("failed to stream reply", "session", msg.SessionKey, "error", err)
+		onEvent := func(ev StreamEvent) {
+			switch ev.Type {
+			case "text":
+				if err := streamer.StreamReply(ctx, msg.ReplyCtx, ev.Text, false); err != nil {
+					slog.Error("failed to stream reply", "session", msg.SessionKey, "error", err)
+				}
+			case "thinking", "tool_start", "tool_end":
+				if err := streamer.StreamEvent(ctx, msg.ReplyCtx, ev); err != nil {
+					slog.Error("failed to stream event", "session", msg.SessionKey, "error", err)
+				}
 			}
 		}
-		reply, attachments, err = Session.Respond(ctx, msg.Content, msg.Images, msg.Files, onText)
+		reply, attachments, err = Session.Respond(ctx, msg.Content, msg.Images, msg.Files, onEvent)
 		if err == nil {
 			if err := streamer.StreamReply(ctx, msg.ReplyCtx, "", true); err != nil {
 				slog.Error("failed to finish stream reply", "session", msg.SessionKey, "error", err)
