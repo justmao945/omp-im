@@ -517,6 +517,7 @@ func (p *Platform) Reply(ctx context.Context, replyCtx any, content string) erro
 		if err := p.sendChunkWithRetry(ctx, rc, chunk); err != nil {
 			return fmt.Errorf("weixin: send chunk %d/%d: %w", i+1, total, err)
 		}
+		slog.Debug("weixin: sent text chunk", "chunk", i+1, "total", total, "peer", rc.peerUserID)
 	}
 	return nil
 }

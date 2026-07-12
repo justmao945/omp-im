@@ -170,19 +170,20 @@ func (t *transport) readLoop() {
 			continue
 		}
 		if msg.Method != "" && t.serverReqHandler != nil {
-			// Server-to-client request/notification
-			go func(m rpcMessage) {
-				result, err := t.serverReqHandler(m.Method, m.Params)
-				if m.ID != 0 {
-					resp := rpcMessage{JSONRPC: "2.0", ID: m.ID}
-					if err != nil {
-						resp.Error = &rpcError{Code: -32603, Message: err.Error()}
-					} else {
-						resp.Result = mustMarshal(result)
-					}
-					_ = t.write(resp)
+			// Server-to-client request/notification. Handle sequentially to keep
+			// session/update notifications (and therefore textParts) in order.
+			slog.Debug("acp: server request", "method", msg.Method)
+			result, err := t.serverReqHandler(msg.Method, msg.Params)
+			if msg.ID != 0 {
+				resp := rpcMessage{JSONRPC: "2.0", ID: msg.ID}
+				if err != nil {
+					resp.Error = &rpcError{Code: -32603, Message: err.Error()}
+				} else {
+					resp.Result = mustMarshal(result)
 				}
-			}(msg)
+				_ = t.write(resp)
+			}
+			continue
 		}
 	}
 	if err := scanner.Err(); err != nil {

@@ -206,6 +206,8 @@ func (s *acpSession) Respond(ctx context.Context, prompt string, images []core.I
 	reply := strings.TrimSpace(strings.Join(textParts, ""))
 	mu.Unlock()
 
+	slog.Debug("acp: assembled reply", "reply", reply, "attachments", len(attachments))
+
 	if reply == "" {
 		return "", nil, fmt.Errorf("acp: no assistant text received")
 	}
