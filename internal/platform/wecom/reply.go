@@ -270,7 +270,7 @@ func buildStreamContent(rc *replyContext, thinkingDisplay, toolDisplay string, f
 				if !rc.turnStart.IsZero() {
 					elapsed = fmt.Sprintf(" %s", formatDuration(time.Since(rc.turnStart)))
 				}
-				parts = append(parts, fmt.Sprintf("🤔 thinking%s", elapsed))
+				parts = append(parts, fmt.Sprintf("🤔 Thinking... %s", elapsed))
 			}
 		case !rc.turnStart.IsZero():
 			// No thinking or tool yet: show that the turn is in progress.
@@ -313,7 +313,7 @@ func buildStreamFooter(rc *replyContext, thinkingDisplay, toolDisplay string) st
 	}
 	if rc.contextSize > 0 {
 		pct := rc.contextUsed * 100 / rc.contextSize
-		items = append(items, fmt.Sprintf("ctx %d%%", pct))
+		items = append(items, fmt.Sprintf("context usage %d%%", pct))
 	}
 
 	footer := "> " + strings.Join(items, " · ")

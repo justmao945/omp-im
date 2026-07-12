@@ -73,7 +73,7 @@ func TestBuildStreamContent(t *testing.T) {
 				rc.thinkingText = "analyzing"
 				rc.turnStart = time.Now().Add(-time.Second)
 			},
-			wantContains: []string{"thinking", "1s"},
+			wantContains: []string{"Thinking...", "1s"},
 		},
 		{
 			name:     "detailed thinking",
@@ -82,7 +82,7 @@ func TestBuildStreamContent(t *testing.T) {
 				rc.thinkingText = "analyzing"
 			},
 			wantContains:   []string{"analyzing"},
-			wantNotContain: "thinking",
+			wantNotContain: "Thinking...",
 		},
 		{
 			name:     "thinking off",
@@ -90,7 +90,7 @@ func TestBuildStreamContent(t *testing.T) {
 			setup: func(rc *replyContext) {
 				rc.thinkingText = "analyzing"
 			},
-			wantNotContain: "thinking",
+			wantNotContain: "Thinking...",
 		},
 		{
 			name: "tool running concise",
@@ -157,7 +157,7 @@ func TestBuildStreamContent(t *testing.T) {
 				"5s",
 				"total",
 				"10s",
-				"ctx 26%",
+				"context usage 26%",
 			},
 		},
 		{

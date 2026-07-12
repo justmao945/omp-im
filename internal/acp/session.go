@@ -842,6 +842,7 @@ func isToolCallCompleted(params json.RawMessage) bool {
 }
 
 // extractToolRawInput returns the raw input of a tool_call as an indented JSON string.
+// It falls back to arguments/params if rawInput is absent.
 func extractToolRawInput(params json.RawMessage) string {
 	var wrap struct {
 		Update json.RawMessage `json:"update"`
@@ -850,12 +851,20 @@ func extractToolRawInput(params json.RawMessage) string {
 		return ""
 	}
 	var head struct {
-		RawInput json.RawMessage `json:"rawInput"`
+		RawInput  json.RawMessage `json:"rawInput"`
+		Arguments json.RawMessage `json:"arguments"`
+		Params    json.RawMessage `json:"params"`
 	}
 	if err := json.Unmarshal(wrap.Update, &head); err != nil {
 		return ""
 	}
-	return prettyJSON(head.RawInput)
+	if raw := bytes.TrimSpace(head.RawInput); len(raw) > 0 {
+		return prettyJSON(raw)
+	}
+	if raw := bytes.TrimSpace(head.Arguments); len(raw) > 0 {
+		return prettyJSON(raw)
+	}
+	return prettyJSON(head.Params)
 }
 
 // extractToolRawOutput returns the raw output of a tool_call_update as an indented JSON string.
