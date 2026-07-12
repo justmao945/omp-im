@@ -356,46 +356,93 @@ func buildToolDetails(rc *replyContext) string {
 
 // formatToolInputOneLine parses a tool-call input JSON and returns a compact,
 // single-line representation like "key=value key2=value2" or "cmd arg1 arg2".
-// Non-JSON values are returned as their first line.
+// It handles nested argument objects (arguments/args/params/input/parameters)
+// and falls back to the first line for non-JSON values.
 func formatToolInputOneLine(input string) string {
 	input = strings.TrimSpace(input)
 	if input == "" {
 		return ""
 	}
-	if obj, ok := parseToolInputJSON(input); ok {
+
+	var raw any
+	if err := json.Unmarshal([]byte(input), &raw); err != nil {
+		if i := strings.IndexByte(input, '\n'); i != -1 {
+			return input[:i]
+		}
+		return input
+	}
+
+	switch v := raw.(type) {
+	case string:
+		return v
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			parts = append(parts, fmt.Sprintf("%v", item))
+		}
+		return strings.Join(parts, " ")
+	case map[string]any:
+		flat := flattenToolInput(v)
 		// Special-case command-line tools: show "cmd arg1 arg2".
-		if cmd, ok := obj["command"].(string); ok && cmd != "" {
-			var args []string
-			if arr, ok := obj["args"].([]any); ok {
-				for _, a := range arr {
-					if s, ok := a.(string); ok {
-						args = append(args, s)
-					}
-				}
-			}
-			if len(args) > 0 {
+		if cmd, ok := flat["command"].(string); ok && cmd != "" {
+			if args, ok := toolArgsToStrings(flat["args"]); ok && len(args) > 0 {
 				return cmd + " " + strings.Join(args, " ")
 			}
 			return cmd
 		}
-		var keys []string
-		for k := range obj {
+		keys := make([]string, 0, len(flat))
+		for k := range flat {
 			keys = append(keys, k)
-		}
-		if len(keys) == 0 {
-			return ""
 		}
 		sort.Strings(keys)
 		parts := make([]string, 0, len(keys))
 		for _, k := range keys {
-			parts = append(parts, fmt.Sprintf("%s=%v", k, obj[k]))
+			if k == "command" || k == "args" {
+				continue
+			}
+			parts = append(parts, fmt.Sprintf("%s=%v", k, flat[k]))
 		}
 		return strings.Join(parts, " ")
+	default:
+		return fmt.Sprintf("%v", v)
 	}
-	if i := strings.IndexByte(input, '\n'); i != -1 {
-		return input[:i]
+}
+
+func flattenToolInput(obj map[string]any) map[string]any {
+	flat := make(map[string]any, len(obj))
+	for k, v := range obj {
+		nested, ok := v.(map[string]any)
+		if ok && isToolInputNestedKey(k) {
+			for nk, nv := range nested {
+				flat[nk] = nv
+			}
+			continue
+		}
+		flat[k] = v
 	}
-	return input
+	return flat
+}
+
+func isToolInputNestedKey(k string) bool {
+	switch k {
+	case "arguments", "args", "params", "input", "parameters":
+		return true
+	}
+	return false
+}
+
+func toolArgsToStrings(v any) ([]string, bool) {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil, false
+	}
+	args := make([]string, 0, len(arr))
+	for _, a := range arr {
+		if s, ok := a.(string); ok {
+			args = append(args, s)
+		}
+	}
+	return args, true
 }
 
 func parseToolInputJSON(input string) (map[string]any, bool) {

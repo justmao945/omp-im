@@ -372,3 +372,30 @@ func updateStreamEvent(rc *replyContext, ev core.StreamEvent) {
 		}
 	}
 }
+
+func TestFormatToolInputOneLine(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"empty", "", ""},
+		{"plain string", "hello", "hello"},
+		{"string in json", `"hello"`, "hello"},
+		{"first line only", "line1\nline2", "line1"},
+		{"command with args", `{"command":"ls","args":["-la","/tmp"]}`, "ls -la /tmp"},
+		{"nested arguments", `{"function":"search","arguments":{"query":"go test","limit":10}}`, "function=search limit=10 query=go test"},
+		{"nested params", `{"name":"fetch","params":{"url":"https://example.com"}}`, "name=fetch url=https://example.com"},
+		{"nested input", `{"input":{"command":"git","args":["status"]}}`, "git status"},
+		{"array", `["a","b","c"]`, "a b c"},
+		{"key=value", `{"path":"/etc/passwd","mode":644}`, "mode=644 path=/etc/passwd"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := formatToolInputOneLine(tc.input)
+			if got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

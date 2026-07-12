@@ -788,9 +788,15 @@ func toolCallCommand(params json.RawMessage) string {
 
 func extractCommandFromRawInput(raw json.RawMessage) string {
 	var input struct {
-		Command string `json:"command"`
-		Cmd     string `json:"cmd"`
-		Name    string `json:"name"`
+		Command   string `json:"command"`
+		Cmd       string `json:"cmd"`
+		Name      string `json:"name"`
+		Function  string `json:"function"`
+		Operation string `json:"operation"`
+		Tool      string `json:"tool"`
+		Action    string `json:"action"`
+		Method    string `json:"method"`
+		Type      string `json:"type"`
 	}
 	_ = json.Unmarshal(raw, &input)
 	if input.Command != "" {
@@ -799,7 +805,25 @@ func extractCommandFromRawInput(raw json.RawMessage) string {
 	if input.Cmd != "" {
 		return input.Cmd
 	}
-	return input.Name
+	if input.Name != "" {
+		return input.Name
+	}
+	if input.Function != "" {
+		return input.Function
+	}
+	if input.Operation != "" {
+		return input.Operation
+	}
+	if input.Tool != "" {
+		return input.Tool
+	}
+	if input.Action != "" {
+		return input.Action
+	}
+	if input.Method != "" {
+		return input.Method
+	}
+	return input.Type
 }
 
 func toolCallPath(params json.RawMessage) string {
