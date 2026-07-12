@@ -51,6 +51,13 @@ type toolRecord struct {
 	end    time.Time
 }
 
+// streamSection is an ordered part of the WeCom stream content.
+// It preserves the chronological order of text, thinking, and tool events.
+type streamSection struct {
+	kind string // "text", "thinking", or "tool"
+	text string
+}
+
 // replyContext stores the data needed to reply to a specific inbound message.
 type replyContext struct {
 	mu sync.Mutex
@@ -60,7 +67,10 @@ type replyContext struct {
 	reqID      string
 	aibotid    string // robot id, used to strip @-mentions in groups
 	streamID   string // reused across stream chunks for a single turn
-	streamText string // accumulated visible text for WeCom stream refresh mode
+	streamText string // accumulated visible text for concise mode
+
+	// streamBody preserves the chronological order of content in detailed mode.
+	streamBody []streamSection
 
 	// streaming state
 	thinkingText     string

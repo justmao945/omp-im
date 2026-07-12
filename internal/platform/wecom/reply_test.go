@@ -80,6 +80,7 @@ func TestBuildStreamContent(t *testing.T) {
 			thinking: "detailed",
 			setup: func(rc *replyContext) {
 				rc.thinkingText = "analyzing"
+				rc.streamBody = []streamSection{{kind: "thinking", text: "analyzing"}}
 			},
 			wantContains:   []string{"> analyzing"},
 			wantNotContain: "Thinking...",
@@ -117,6 +118,7 @@ func TestBuildStreamContent(t *testing.T) {
 					input: "{\"path\":\"/tmp\"}",
 					start: time.Now().Add(-2 * time.Second),
 				}}
+				rc.streamBody = []streamSection{{kind: "tool", text: "🔧 ls\npath=/tmp"}}
 			},
 			wantContains: []string{"> 🔧 ls", "> path"},
 		},
@@ -126,6 +128,10 @@ func TestBuildStreamContent(t *testing.T) {
 			setup: func(rc *replyContext) {
 				rc.thinkingText = "analyzing"
 				rc.streamText = "body text"
+				rc.streamBody = []streamSection{
+					{kind: "thinking", text: "analyzing"},
+					{kind: "text", text: "body text"},
+				}
 			},
 			wantContains:   []string{"body text", "> analyzing"},
 			wantNotContain: "Thinking...",
@@ -140,6 +146,10 @@ func TestBuildStreamContent(t *testing.T) {
 					input: "{\"path\":\"/tmp\"}",
 				}}
 				rc.streamText = "body text"
+				rc.streamBody = []streamSection{
+					{kind: "tool", text: "🔧 ls\npath=/tmp"},
+					{kind: "text", text: "body text"},
+				}
 			},
 			wantContains: []string{"body text", "> 🔧 ls", "> path=/tmp"},
 		},
@@ -215,6 +225,10 @@ func TestBuildStreamContent(t *testing.T) {
 				rc.toolTotalDuration = 3 * time.Second
 				rc.turnEnd = time.Now()
 				rc.streamText = "result"
+				rc.streamBody = []streamSection{
+					{kind: "text", text: "result"},
+					{kind: "tool", text: "🔧 cat\npath=/etc/passwd"},
+				}
 				rc.toolHistory = []toolRecord{{
 					name:   "cat",
 					input:  "{\"path\":\"/etc/passwd\"}",
