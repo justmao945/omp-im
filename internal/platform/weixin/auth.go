@@ -216,15 +216,27 @@ func waitForQRLogin(ctx context.Context, client *apiClient, qrcodeContent string
 }
 
 func saveQRCodeImage(path, b64 string) error {
-	if strings.TrimSpace(b64) == "" {
+	b64 = strings.TrimSpace(b64)
+	if b64 == "" {
 		return errors.New("empty QR image content")
 	}
+
+	// iLink sometimes returns a data URL like "data:image/png;base64,AAAA...".
+	if idx := strings.Index(b64, "base64,"); idx != -1 {
+		b64 = b64[idx+len("base64,"):]
+	}
+
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
+
+	// Try standard base64 first, then URL-safe base64.
 	data, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
-		return fmt.Errorf("decode QR image: %w", err)
+		data, err = base64.URLEncoding.DecodeString(b64)
+		if err != nil {
+			return fmt.Errorf("decode QR image: %w", err)
+		}
 	}
 	return os.WriteFile(path, data, 0o600)
 }
