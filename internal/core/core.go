@@ -37,6 +37,12 @@ type Agent interface {
 	Stop() error
 }
 
+// HistoryEntry describes a single message in the session's conversation context.
+type HistoryEntry struct {
+	Role    string
+	Content string
+}
+
 // AgentStatus describes the current state of an agent turn.
 type AgentStatus struct {
 	State               string
@@ -57,6 +63,8 @@ type AgentSession interface {
 	// Status returns the current state of the session (idle, thinking, using_tools, etc.)
 	// along with turn timing and usage information.
 	Status() AgentStatus
+	// History returns the conversation context retained by the session.
+	History() []HistoryEntry
 	Close() error
 }
 

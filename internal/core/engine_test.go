@@ -47,6 +47,7 @@ type fakeSession struct {
 	project     Project
 	closed      bool
 	delay       time.Duration
+	history     []HistoryEntry
 }
 
 func (s *fakeSession) Respond(ctx context.Context, prompt string, images []ImageAttachment) (string, []OutboundAttachment, error) {
@@ -57,11 +58,17 @@ func (s *fakeSession) Respond(ctx context.Context, prompt string, images []Image
 		case <-time.After(s.delay):
 		}
 	}
-	return s.reply + ":" + prompt, s.attachments, nil
+	reply := s.reply + ":" + prompt
+	s.history = append(s.history, HistoryEntry{Role: "user", Content: prompt})
+	s.history = append(s.history, HistoryEntry{Role: "assistant", Content: reply})
+	return reply, s.attachments, nil
 }
 
 func (s *fakeSession) Status() AgentStatus {
 	return AgentStatus{State: "idle"}
+}
+func (s *fakeSession) History() []HistoryEntry {
+	return s.history
 }
 func (s *fakeSession) Close() error {
 	s.closed = true
@@ -504,6 +511,60 @@ func TestEnginePCommand(t *testing.T) {
 
 	if len(replies) != 1 || !strings.Contains(replies[0], "Agent:") {
 		t.Fatalf("replies = %v", replies)
+	}
+}
+
+func TestEnginePCommandShowsContext(t *testing.T) {
+	eng, _ := newTestEngine("fake")
+	p := &fakePlatform{name: "fake"}
+	eng.AddPlatform(p)
+
+	go func() {
+		for p.getHandler() == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+		// First message creates the session and populates history.
+		p.getHandler()(p, &Message{
+			SessionKey: "fake:u1",
+			Platform:   "fake",
+			UserID:     "u1",
+			Content:    "hello",
+			ReplyCtx:   "ctx",
+		})
+		time.Sleep(50 * time.Millisecond)
+		// /p should now include the conversation context.
+		p.getHandler()(p, &Message{
+			SessionKey: "fake:u1",
+			Platform:   "fake",
+			UserID:     "u1",
+			Content:    "/p",
+			ReplyCtx:   "ctx",
+		})
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		_ = eng.Run()
+		close(done)
+	}()
+
+	time.Sleep(150 * time.Millisecond)
+	_ = eng.Stop()
+	<-done
+
+	p.mu.Lock()
+	replies := append([]string(nil), p.replies...)
+	p.mu.Unlock()
+
+	if len(replies) != 2 {
+		t.Fatalf("got %d replies, want 2", len(replies))
+	}
+	pReply := replies[1]
+	if !strings.Contains(pReply, "上下文:") {
+		t.Fatalf("/p reply missing context header: %q", pReply)
+	}
+	if !strings.Contains(pReply, "[U]") || !strings.Contains(pReply, "[A]") {
+		t.Fatalf("/p reply missing user/assistant history markers: %q", pReply)
 	}
 }
 

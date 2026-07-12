@@ -85,11 +85,17 @@ func saveSessionState(path string, state *sessionState) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
+	// Use a unique temp file per call so concurrent persists do not race on
+	// the same path and leave each other with a missing tmp file.
+	tmp := path + ".tmp." + randomHex(8)
 	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 func hasUsableSession(path string) bool {

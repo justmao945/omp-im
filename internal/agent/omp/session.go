@@ -171,9 +171,11 @@ func (s *acpSession) Respond(ctx context.Context, prompt string, images []core.I
 				mu.Unlock()
 			}
 			if hasToolCall(params) {
+				slog.Debug("acp: tool call started", "session", s.sessionKey)
 				s.setToolStatus(true)
 			}
 			if isToolCallCompleted(params) {
+				slog.Debug("acp: tool call completed", "session", s.sessionKey)
 				s.setToolStatus(false)
 			}
 			collectToolCall(params, toolCalls)
@@ -269,6 +271,16 @@ func (s *acpSession) Status() core.AgentStatus {
 		st.CurrentToolDuration = time.Since(s.currentTool)
 	}
 	return st
+}
+
+func (s *acpSession) History() []core.HistoryEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]core.HistoryEntry, len(s.history))
+	for i, h := range s.history {
+		out[i] = core.HistoryEntry{Role: h.Role, Content: h.Content}
+	}
+	return out
 }
 
 func (s *acpSession) resetStatus() {

@@ -132,6 +132,7 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		return
 	}
 
+	slog.Info("agent turn started", "session", msg.SessionKey, "agent", e.sessionAgent(msg.SessionKey), "project", e.sessionProject(msg.SessionKey))
 	e.setSessionStatus(msg.SessionKey, "busy")
 	e.activeTurnsMu.Lock()
 	e.activeTurns[msg.SessionKey] = cancel
@@ -149,10 +150,12 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 			// The turn was cancelled by /esc or shutdown; do not send an error reply.
 			return
 		}
-		slog.Error("agent respond error", "session", msg.SessionKey, "error", err)
+		slog.Error("agent turn error", "session", msg.SessionKey, "error", err)
 		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("处理失败: %v", err))
 		return
 	}
+
+	slog.Info("agent turn finished", "session", msg.SessionKey, "reply_len", len(reply), "attachments", len(attachments))
 
 	if err := p.Reply(ctx, msg.ReplyCtx, reply); err != nil {
 		slog.Error("failed to send reply", "session", msg.SessionKey, "error", err)
@@ -373,7 +376,7 @@ func (e *Engine) handleHelpCommand(ctx context.Context, p Platform, msg *Message
 /proj <name> — 切换到指定 project
 /list — 列出当前 agent 的 active sessions
 /esc — 中断当前正在生成的回复
-/p — 查看当前 agent、project 和会话状态
+/p — 查看当前 agent、project、会话状态和最近上下文
 /new — 新建会话（关闭当前 session，下条消息开启新对话）
 /help, /? — 显示本帮助`)
 }
@@ -428,6 +431,32 @@ func (e *Engine) handlePCommand(ctx context.Context, p Platform, msg *Message) {
 	}
 	if st.ReasoningEffort != "" {
 		lines = append(lines, fmt.Sprintf("思考强度: %s", st.ReasoningEffort))
+	}
+
+	history := ent.session.History()
+	if len(history) > 0 {
+		turns := len(history) / 2
+		lines = append(lines, fmt.Sprintf("上下文: %d 轮", turns))
+		const maxShown = 6 // 3 turns
+		start := 0
+		if len(history) > maxShown {
+			start = len(history) - maxShown
+			lines = append(lines, "...")
+		}
+		for i := start; i < len(history); i++ {
+			h := history[i]
+			prefix := "[U]"
+			if h.Role == "assistant" {
+				prefix = "[A]"
+			}
+			content := h.Content
+			if len(content) > 60 {
+				content = content[:57] + "..."
+			}
+			lines = append(lines, fmt.Sprintf("%s %s", prefix, content))
+		}
+	} else {
+		lines = append(lines, "上下文: 空")
 	}
 
 	_ = p.Reply(ctx, msg.ReplyCtx, strings.Join(lines, "\n"))
