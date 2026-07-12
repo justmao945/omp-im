@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -372,12 +373,11 @@ func (s *Session) Respond(ctx context.Context, prompt string, images []core.Imag
 				}
 				slog.Info("acp: tool call started", "session", s.sessionKey, "kind", toolCallKind(params), "path", toolCallPath(params), "command", truncate(cmd, 200))
 				s.setToolStatus(true, cmd)
-				emit(core.StreamEvent{Type: "tool_start", Tool: cmd, Status: s.Status()})
+				emit(core.StreamEvent{Type: "tool_start", Tool: cmd, ToolInput: extractToolRawInput(params), Status: s.Status()})
 			}
 			if isToolCallCompleted(params) {
 				slog.Info("acp: tool call completed", "session", s.sessionKey)
-				path := toolCallPath(params)
-				emit(core.StreamEvent{Type: "tool_end", Tool: path, Status: s.Status()})
+				emit(core.StreamEvent{Type: "tool_end", ToolOutput: extractToolRawOutput(params), Status: s.Status()})
 				s.setToolStatus(false, "")
 			}
 			collectToolCall(params, toolCalls)
@@ -826,6 +826,52 @@ func isToolCallCompleted(params json.RawMessage) bool {
 		return false
 	}
 	return head.SessionUpdate == "tool_call_update" && head.ToolCallID != "" && head.Status == "completed"
+}
+
+// extractToolRawInput returns the raw input of a tool_call as an indented JSON string.
+func extractToolRawInput(params json.RawMessage) string {
+	var wrap struct {
+		Update json.RawMessage `json:"update"`
+	}
+	if err := json.Unmarshal(params, &wrap); err != nil {
+		return ""
+	}
+	var head struct {
+		RawInput json.RawMessage `json:"rawInput"`
+	}
+	if err := json.Unmarshal(wrap.Update, &head); err != nil {
+		return ""
+	}
+	return prettyJSON(head.RawInput)
+}
+
+// extractToolRawOutput returns the raw output of a tool_call_update as an indented JSON string.
+func extractToolRawOutput(params json.RawMessage) string {
+	var wrap struct {
+		Update json.RawMessage `json:"update"`
+	}
+	if err := json.Unmarshal(params, &wrap); err != nil {
+		return ""
+	}
+	var head struct {
+		RawOutput json.RawMessage `json:"rawOutput"`
+	}
+	if err := json.Unmarshal(wrap.Update, &head); err != nil {
+		return ""
+	}
+	return prettyJSON(head.RawOutput)
+}
+
+func prettyJSON(raw json.RawMessage) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return ""
+	}
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, raw, "", "  "); err != nil {
+		return string(raw)
+	}
+	return buf.String()
 }
 
 func extractPathFromRawInput(raw json.RawMessage) string {

@@ -41,6 +41,15 @@ type imageContent struct {
 	aeskey string
 }
 
+// toolRecord stores one tool call for detailed footer display.
+type toolRecord struct {
+	name   string
+	input  string
+	output string
+	start  time.Time
+	end    time.Time
+}
+
 // replyContext stores the data needed to reply to a specific inbound message.
 type replyContext struct {
 	chatid     string
@@ -57,6 +66,7 @@ type replyContext struct {
 	toolStart        time.Time
 	toolCount        int
 	toolTotalDuration time.Duration
+	toolHistory      []toolRecord
 	turnStart        time.Time
 	turnEnd          time.Time
 }

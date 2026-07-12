@@ -106,6 +106,11 @@ func (p *Platform) StreamEvent(ctx context.Context, replyCtx any, ev core.Stream
 		}
 		rc.toolName = ev.Tool
 		rc.toolStart = time.Now()
+		rc.toolHistory = append(rc.toolHistory, toolRecord{
+			name:  ev.Tool,
+			input: ev.ToolInput,
+			start: time.Now(),
+		})
 	case "tool_end":
 		if !rc.toolStart.IsZero() {
 			rc.toolTotalDuration += time.Since(rc.toolStart)
@@ -113,6 +118,10 @@ func (p *Platform) StreamEvent(ctx context.Context, replyCtx any, ev core.Stream
 		rc.toolCount++
 		rc.toolName = ""
 		rc.toolStart = time.Time{}
+		if n := len(rc.toolHistory); n > 0 {
+			rc.toolHistory[n-1].output = ev.ToolOutput
+			rc.toolHistory[n-1].end = time.Now()
+		}
 	}
 
 	return p.renderStream(ctx, rc, false)
@@ -127,7 +136,7 @@ func (p *Platform) renderStream(ctx context.Context, rc *replyContext, finished 
 		rc.turnEnd = time.Now()
 	}
 
-	content := buildStreamContent(rc, p.cfg.thinkingDisplay, finished)
+	content := buildStreamContent(rc, p.cfg.thinkingDisplay, p.cfg.toolDisplay, finished)
 	body := map[string]interface{}{
 		"msgtype": "stream",
 		"stream": map[string]interface{}{
@@ -154,18 +163,26 @@ func (p *Platform) renderStream(ctx context.Context, rc *replyContext, finished 
 
 // buildStreamContent assembles the visible text with optional status line and footer.
 // Once the body text starts, the status line is hidden and replaced by the body.
-func buildStreamContent(rc *replyContext, thinkingDisplay string, finished bool) string {
+func buildStreamContent(rc *replyContext, thinkingDisplay, toolDisplay string, finished bool) string {
 	var parts []string
 
 	if rc.streamText == "" {
 		// Status line: only shown while no body text has arrived yet.
 		switch {
-		case rc.toolName != "":
+		case rc.toolName != "" && toolDisplay != "off":
 			elapsed := ""
 			if !rc.toolStart.IsZero() {
 				elapsed = fmt.Sprintf(" %s", formatDuration(time.Since(rc.toolStart)))
 			}
-			parts = append(parts, fmt.Sprintf("🔧 %s%s", rc.toolName, elapsed))
+			line := fmt.Sprintf("🔧 %s%s", rc.toolName, elapsed)
+			if toolDisplay == "detailed" && rc.toolHistory != nil {
+				if n := len(rc.toolHistory); n > 0 {
+					if preview := truncateText(rc.toolHistory[n-1].input, 120); preview != "" {
+						line += "\n```\n" + preview + "\n```"
+					}
+				}
+			}
+			parts = append(parts, line)
 		case rc.thinkingText != "" && thinkingDisplay != "off":
 			if thinkingDisplay == "detailed" {
 				parts = append(parts, rc.thinkingText)
@@ -184,7 +201,7 @@ func buildStreamContent(rc *replyContext, thinkingDisplay string, finished bool)
 
 	// Footer at the end of the turn.
 	if finished {
-		if footer := buildStreamFooter(rc); footer != "" {
+		if footer := buildStreamFooter(rc, thinkingDisplay, toolDisplay); footer != "" {
 			parts = append(parts, footer)
 		}
 	}
@@ -193,14 +210,15 @@ func buildStreamContent(rc *replyContext, thinkingDisplay string, finished bool)
 }
 
 // buildStreamFooter builds the summary footer shown at the end of a turn.
-func buildStreamFooter(rc *replyContext) string {
+func buildStreamFooter(rc *replyContext, thinkingDisplay, toolDisplay string) string {
 	var items []string
 
-	hasThinking := !rc.thinkingEnd.IsZero() && rc.thinkingEnd.After(rc.turnStart)
+	hasThinking := thinkingDisplay != "off" && !rc.thinkingEnd.IsZero() && rc.thinkingEnd.After(rc.turnStart)
 	if hasThinking {
 		items = append(items, fmt.Sprintf("thinking %s", formatDuration(rc.thinkingEnd.Sub(rc.turnStart))))
 	}
-	if rc.toolCount > 0 {
+	hasTools := toolDisplay != "off" && rc.toolCount > 0
+	if hasTools {
 		items = append(items, fmt.Sprintf("%d tool%s %s", rc.toolCount, plural(rc.toolCount), formatDuration(rc.toolTotalDuration)))
 	}
 	if len(items) == 0 {
@@ -212,7 +230,51 @@ func buildStreamFooter(rc *replyContext) string {
 		items = append(items, fmt.Sprintf("total %s", formatDuration(time.Since(rc.turnStart))))
 	}
 
-	return "> " + strings.Join(items, " · ")
+	footer := "> " + strings.Join(items, " · ")
+	if toolDisplay == "detailed" {
+		if details := buildToolDetails(rc); details != "" {
+			footer += "\n\n" + details
+		}
+	}
+	return footer
+}
+
+// buildToolDetails renders a detailed log of every tool call for the footer.
+func buildToolDetails(rc *replyContext) string {
+	if len(rc.toolHistory) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, rec := range rc.toolHistory {
+		elapsed := "0s"
+		if !rec.start.IsZero() {
+			if rec.end.IsZero() {
+				elapsed = formatDuration(time.Since(rec.start))
+			} else {
+				elapsed = formatDuration(rec.end.Sub(rec.start))
+			}
+		}
+		line := fmt.Sprintf("🔧 %s (%s)", rec.name, elapsed)
+		if rec.input != "" {
+			line += "\n```\n" + rec.input + "\n```"
+		}
+		if rec.output != "" {
+			line += "\n→\n```\n" + rec.output + "\n```"
+		}
+		parts = append(parts, line)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// truncateText returns a prefix of text up to max runes, appending "..." if truncated.
+func truncateText(text string, maxRunes int) string {
+	if len(text) == 0 {
+		return ""
+	}
+	if utf8.RuneCountInString(text) <= maxRunes {
+		return text
+	}
+	return string([]rune(text)[:maxRunes]) + "..."
 }
 
 // formatDuration returns a human-readable duration rounded to seconds.

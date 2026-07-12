@@ -7,12 +7,13 @@ import (
 
 // config holds parsed options for the WeCom platform.
 type config struct {
-	botID          string
-	secret         string
-	websocketURL   string
-	allowFrom      string
-	groupAllowFrom string
+	botID           string
+	secret          string
+	websocketURL    string
+	allowFrom       string
+	groupAllowFrom  string
 	thinkingDisplay string // "concise", "detailed", or "off"
+	toolDisplay     string // "concise", "detailed", or "off"
 }
 
 func parseConfig(opts map[string]any) (*config, error) {
@@ -40,13 +41,25 @@ func parseConfig(opts map[string]any) (*config, error) {
 		return nil, fmt.Errorf("wecom: thinking_display must be concise, detailed, or off")
 	}
 
+	toolDisplay, _ := opts["tool_display"].(string)
+	toolDisplay = strings.ToLower(strings.TrimSpace(toolDisplay))
+	if toolDisplay == "" {
+		toolDisplay = "concise"
+	}
+	switch toolDisplay {
+	case "concise", "detailed", "off":
+	default:
+		return nil, fmt.Errorf("wecom: tool_display must be concise, detailed, or off")
+	}
+
 	return &config{
-		botID:          strings.TrimSpace(botID),
-		secret:         strings.TrimSpace(secret),
-		websocketURL:   strings.TrimSpace(websocketURL),
-		allowFrom:      strings.TrimSpace(allowFrom),
-		groupAllowFrom: strings.TrimSpace(groupAllowFrom),
+		botID:           strings.TrimSpace(botID),
+		secret:          strings.TrimSpace(secret),
+		websocketURL:    strings.TrimSpace(websocketURL),
+		allowFrom:       strings.TrimSpace(allowFrom),
+		groupAllowFrom:  strings.TrimSpace(groupAllowFrom),
 		thinkingDisplay: thinkingDisplay,
+		toolDisplay:     toolDisplay,
 	}, nil
 }
 

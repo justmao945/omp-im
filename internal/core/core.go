@@ -17,11 +17,13 @@ type Project struct {
 // StreamEvent carries a single streaming update from an agent session.
 // Platforms can use it to render typing, thinking, and tool status.
 type StreamEvent struct {
-	Type   string      // "text", "thinking", "tool_start", "tool_end", "finish"
-	Text   string      // text or thinking content
-	Tool   string      // tool command/name
-	Result string      // one-line tool result summary
-	Status AgentStatus // snapshot when the event occurred
+	Type       string      // "text", "thinking", "tool_start", "tool_end", "finish"
+	Text       string      // text or thinking content
+	Tool       string      // tool command/name
+	Result     string      // one-line tool result summary
+	ToolInput  string      // detailed tool call input (JSON or raw text)
+	ToolOutput string      // detailed tool call output (JSON or raw text)
+	Status     AgentStatus // snapshot when the event occurred
 }
 
 // StreamReplyer is implemented by platforms that can send incremental updates

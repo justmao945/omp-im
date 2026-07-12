@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/justmao945/omp-im/internal/core"
 )
 
 func TestSplitTextChunks(t *testing.T) {
@@ -39,15 +41,16 @@ func TestSplitTextChunks(t *testing.T) {
 func TestBuildStreamContent(t *testing.T) {
 	cases := []struct {
 		name           string
-		display        string
+		thinking       string
+		tool           string
 		finished       bool
 		setup          func(*replyContext)
 		wantContains   []string
 		wantNotContain string
 	}{
 		{
-			name:    "concise thinking",
-			display: "concise",
+			name:     "concise thinking",
+			thinking: "concise",
 			setup: func(rc *replyContext) {
 				rc.thinkingText = "analyzing"
 				rc.turnStart = time.Now().Add(-time.Second)
@@ -55,8 +58,8 @@ func TestBuildStreamContent(t *testing.T) {
 			wantContains: []string{"thinking", "1s"},
 		},
 		{
-			name:    "detailed thinking",
-			display: "detailed",
+			name:     "detailed thinking",
+			thinking: "detailed",
 			setup: func(rc *replyContext) {
 				rc.thinkingText = "analyzing"
 			},
@@ -64,16 +67,16 @@ func TestBuildStreamContent(t *testing.T) {
 			wantNotContain: "thinking",
 		},
 		{
-			name:    "thinking off",
-			display: "off",
+			name:     "thinking off",
+			thinking: "off",
 			setup: func(rc *replyContext) {
 				rc.thinkingText = "analyzing"
 			},
 			wantNotContain: "thinking",
 		},
 		{
-			name:    "tool running",
-			display: "concise",
+			name: "tool running concise",
+			tool: "concise",
 			setup: func(rc *replyContext) {
 				rc.toolName = "git status"
 				rc.toolStart = time.Now().Add(-2 * time.Second)
@@ -81,8 +84,31 @@ func TestBuildStreamContent(t *testing.T) {
 			wantContains: []string{"git status", "2s"},
 		},
 		{
-			name:    "status hidden when body arrives",
-			display: "concise",
+			name: "tool running detailed",
+			tool: "detailed",
+			setup: func(rc *replyContext) {
+				rc.toolName = "ls"
+				rc.toolStart = time.Now().Add(-2 * time.Second)
+				rc.toolHistory = []toolRecord{{
+					name:  "ls",
+					input: "{\"path\":\"/tmp\"}",
+					start: time.Now().Add(-2 * time.Second),
+				}}
+			},
+			wantContains: []string{"ls", "2s", "path"},
+		},
+		{
+			name: "tool off",
+			tool: "off",
+			setup: func(rc *replyContext) {
+				rc.toolName = "git status"
+			},
+			wantNotContain: "git status",
+		},
+		{
+			name:     "status hidden when body arrives",
+			thinking: "concise",
+			tool:     "concise",
 			setup: func(rc *replyContext) {
 				rc.thinkingText = "analyzing"
 				rc.toolName = "git status"
@@ -93,7 +119,8 @@ func TestBuildStreamContent(t *testing.T) {
 		},
 		{
 			name:     "finish footer",
-			display:  "concise",
+			thinking: "concise",
+			tool:     "concise",
 			finished: true,
 			setup: func(rc *replyContext) {
 				rc.turnStart = time.Now().Add(-10 * time.Second)
@@ -112,6 +139,27 @@ func TestBuildStreamContent(t *testing.T) {
 				"10s",
 			},
 		},
+		{
+			name:     "detailed tool footer",
+			thinking: "off",
+			tool:     "detailed",
+			finished: true,
+			setup: func(rc *replyContext) {
+				rc.turnStart = time.Now().Add(-10 * time.Second)
+				rc.toolCount = 1
+				rc.toolTotalDuration = 3 * time.Second
+				rc.turnEnd = time.Now()
+				rc.streamText = "result"
+				rc.toolHistory = []toolRecord{{
+					name:   "cat",
+					input:  "{\"path\":\"/etc/passwd\"}",
+					output: "root:x:0:0",
+					start:  time.Now().Add(-5 * time.Second),
+					end:    time.Now().Add(-2 * time.Second),
+				}}
+			},
+			wantContains: []string{"cat", "path", "root:x"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -119,7 +167,7 @@ func TestBuildStreamContent(t *testing.T) {
 			if tc.setup != nil {
 				tc.setup(rc)
 			}
-			got := buildStreamContent(rc, tc.display, tc.finished)
+			got := buildStreamContent(rc, tc.thinking, tc.tool, tc.finished)
 			for _, want := range tc.wantContains {
 				if !strings.Contains(got, want) {
 					t.Fatalf("content missing %q:\n%s", want, got)
@@ -133,18 +181,135 @@ func TestBuildStreamContent(t *testing.T) {
 }
 
 func TestStreamFooter(t *testing.T) {
-	rc := &replyContext{
-		turnStart:         time.Now().Add(-10 * time.Second),
-		thinkingEnd:       time.Now().Add(-8 * time.Second),
-		toolCount:         2,
-		toolTotalDuration: 5 * time.Second,
-		turnEnd:           time.Now(),
+	cases := []struct {
+		name           string
+		thinking       string
+		tool           string
+		setup          func(*replyContext)
+		wantContains   []string
+		wantNotContain string
+	}{
+		{
+			name:     "thinking and tools",
+			thinking: "concise",
+			tool:     "concise",
+			setup: func(rc *replyContext) {
+				rc.turnStart = time.Now().Add(-10 * time.Second)
+				rc.thinkingEnd = time.Now().Add(-8 * time.Second)
+				rc.toolCount = 2
+				rc.toolTotalDuration = 5 * time.Second
+				rc.turnEnd = time.Now()
+			},
+			wantContains: []string{"thinking", "2 tools", "5s", "total", "10s"},
+		},
+		{
+			name:     "tool off hides tool summary",
+			thinking: "concise",
+			tool:     "off",
+			setup: func(rc *replyContext) {
+				rc.turnStart = time.Now().Add(-10 * time.Second)
+				rc.thinkingEnd = time.Now().Add(-8 * time.Second)
+				rc.toolCount = 2
+				rc.toolTotalDuration = 5 * time.Second
+				rc.turnEnd = time.Now()
+			},
+			wantContains:   []string{"thinking"},
+			wantNotContain: "tools",
+		},
+		{
+			name:     "detailed tool footer",
+			thinking: "off",
+			tool:     "detailed",
+			setup: func(rc *replyContext) {
+				rc.turnStart = time.Now().Add(-10 * time.Second)
+				rc.toolCount = 1
+				rc.toolTotalDuration = 3 * time.Second
+				rc.turnEnd = time.Now()
+				rc.toolHistory = []toolRecord{{
+					name:   "cat",
+					input:  "{\"path\":\"/etc/passwd\"}",
+					output: "root:x:0:0",
+					start:  time.Now().Add(-5 * time.Second),
+					end:    time.Now().Add(-2 * time.Second),
+				}}
+			},
+			wantContains: []string{"cat", "path", "root:x"},
+		},
 	}
-	footer := buildStreamFooter(rc)
-	for _, want := range []string{"thinking", "2 tools", "5s", "total", "10s"} {
-		if !strings.Contains(footer, want) {
-			t.Fatalf("footer missing %q:\n%s", want, footer)
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rc := &replyContext{}
+			if tc.setup != nil {
+				tc.setup(rc)
+			}
+			footer := buildStreamFooter(rc, tc.thinking, tc.tool)
+			for _, want := range tc.wantContains {
+				if !strings.Contains(footer, want) {
+					t.Fatalf("footer missing %q:\n%s", want, footer)
+				}
+			}
+			if tc.wantNotContain != "" && strings.Contains(footer, tc.wantNotContain) {
+				t.Fatalf("footer should not contain %q:\n%s", tc.wantNotContain, footer)
+			}
+		})
 	}
 }
 
+func TestStreamEventUpdatesState(t *testing.T) {
+	rc := &replyContext{}
+	updateStreamEvent(rc, core.StreamEvent{Type: "thinking", Text: "step 1"})
+	if !strings.Contains(rc.thinkingText, "step 1") {
+		t.Fatalf("thinking text not accumulated")
+	}
+
+	updateStreamEvent(rc, core.StreamEvent{Type: "tool_start", Tool: "ls", ToolInput: "{\"path\":\"/tmp\"}"})
+	if rc.toolName != "ls" {
+		t.Fatalf("toolName = %q", rc.toolName)
+	}
+	if len(rc.toolHistory) != 1 {
+		t.Fatalf("toolHistory len = %d", len(rc.toolHistory))
+	}
+	if rc.toolHistory[0].input != "{\"path\":\"/tmp\"}" {
+		t.Fatalf("toolHistory input = %q", rc.toolHistory[0].input)
+	}
+
+	updateStreamEvent(rc, core.StreamEvent{Type: "tool_end", ToolOutput: "ok"})
+	if rc.toolCount != 1 {
+		t.Fatalf("toolCount = %d", rc.toolCount)
+	}
+	if rc.toolHistory[0].output != "ok" {
+		t.Fatalf("toolHistory output = %q", rc.toolHistory[0].output)
+	}
+	if rc.toolName != "" {
+		t.Fatalf("toolName should be cleared")
+	}
+}
+
+func updateStreamEvent(rc *replyContext, ev core.StreamEvent) {
+	switch ev.Type {
+	case "thinking":
+		rc.thinkingText += ev.Text
+	case "tool_start":
+		if rc.thinkingText != "" && rc.thinkingEnd.IsZero() {
+			rc.thinkingEnd = time.Now()
+		}
+		rc.toolName = ev.Tool
+		rc.toolStart = time.Now()
+		rc.toolHistory = append(rc.toolHistory, toolRecord{
+			name:  ev.Tool,
+			input: ev.ToolInput,
+			start: time.Now(),
+		})
+	case "tool_end":
+		if !rc.toolStart.IsZero() {
+			rc.toolTotalDuration += time.Since(rc.toolStart)
+		}
+		rc.toolCount++
+		rc.toolName = ""
+		rc.toolStart = time.Time{}
+		if n := len(rc.toolHistory); n > 0 {
+			rc.toolHistory[n-1].output = ev.ToolOutput
+			rc.toolHistory[n-1].end = time.Now()
+		}
+	}
+}
