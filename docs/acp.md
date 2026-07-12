@@ -1,6 +1,6 @@
 # ACP integration
 
-`omp-im` communicates with the local `omp` agent using the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/).
+`omp-im` communicates with local agents using the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/). The protocol implementation lives in `internal/acp` and is transport-agnostic; `internal/agent/omp` is a thin launcher that starts the `omp acp` command and wires it to the ACP client.
 
 ## Session lifecycle
 

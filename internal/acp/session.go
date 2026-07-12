@@ -1,4 +1,4 @@
-package omp
+package acp
 
 import (
 	"context"
@@ -16,11 +16,19 @@ import (
 	"github.com/justmao945/omp-im/internal/core"
 )
 
-// acpSession is a single ACP conversation session with the omp agent.
-type acpSession struct {
-	cfg        agentConfig
+// Config carries the runtime parameters for spawning an ACP agent process.
+type Config struct {
+	Command          string
+	Args             []string
+	WorkDir          string
+	AutoApproveTools bool
+}
+
+// Session is a single ACP conversation session with a local agent.
+type Session struct {
+	cfg        Config
 	sessionKey string
-	tr         *transport
+	tr         *Transport
 
 	mu            sync.Mutex
 	turnMu        sync.Mutex
@@ -34,7 +42,7 @@ type acpSession struct {
 	history       []historyEntry
 	currentStatus string
 	lastActivityAt time.Time
-	onClose       func()
+	OnClose       func()
 	capLoadSession bool
 	capResumeSession bool
 }
@@ -68,7 +76,7 @@ func extractModel(opts []configOption) string {
 	return ""
 }
 
-func (s *acpSession) setModelFromConfigOptions(opts []configOption) {
+func (s *Session) setModelFromConfigOptions(opts []configOption) {
 	if m := extractModel(opts); m != "" {
 		s.statusMu.Lock()
 		s.agentStatus.Model = m
@@ -102,8 +110,8 @@ type promptResult struct {
 	} `json:"usage"`
 }
 
-func newACPSession(ctx context.Context, cfg agentConfig, sessionKey string, resumeSessionID string, tr *transport) (*acpSession, error) {
-	s := &acpSession{
+func NewSession(ctx context.Context, cfg Config, sessionKey string, resumeSessionID string, tr *Transport) (*Session, error) {
+	s := &Session{
 		cfg:             cfg,
 		sessionKey:      sessionKey,
 		resumeSessionID: resumeSessionID,
@@ -117,7 +125,7 @@ func newACPSession(ctx context.Context, cfg agentConfig, sessionKey string, resu
 	return s, nil
 }
 
-func (s *acpSession) handshake(ctx context.Context) error {
+func (s *Session) handshake(ctx context.Context) error {
 	initParams := map[string]any{
 		"protocolVersion": 1,
 		"clientInfo": map[string]any{
@@ -201,7 +209,7 @@ func (s *acpSession) handshake(ctx context.Context) error {
 	return nil
 }
 
-func (s *acpSession) callSessionResume(ctx context.Context) error {
+func (s *Session) callSessionResume(ctx context.Context) error {
 	res, err := s.tr.call(ctx, "session/resume", map[string]any{
 		"sessionId":  s.resumeSessionID,
 		"cwd":        s.cfg.WorkDir,
@@ -226,7 +234,7 @@ func (s *acpSession) callSessionResume(ctx context.Context) error {
 	return nil
 }
 
-func (s *acpSession) callSessionLoad(ctx context.Context) error {
+func (s *Session) callSessionLoad(ctx context.Context) error {
 	res, err := s.tr.call(ctx, "session/load", map[string]any{
 		"sessionId":  s.resumeSessionID,
 		"cwd":        s.cfg.WorkDir,
@@ -251,11 +259,11 @@ func (s *acpSession) callSessionLoad(ctx context.Context) error {
 	return nil
 }
 
-func (s *acpSession) SessionID() string {
+func (s *Session) SessionID() string {
 	return s.sessionID
 }
 
-func (s *acpSession) Respond(ctx context.Context, prompt string, images []core.ImageAttachment) (string, []core.OutboundAttachment, error) {
+func (s *Session) Respond(ctx context.Context, prompt string, images []core.ImageAttachment) (string, []core.OutboundAttachment, error) {
 	if s.sessionID == "" {
 		return "", nil, fmt.Errorf("acp: no session id")
 	}
@@ -371,7 +379,7 @@ func (s *acpSession) Respond(ctx context.Context, prompt string, images []core.I
 	return reply, attachments, nil
 }
 
-func (s *acpSession) setStatus(status string) {
+func (s *Session) setStatus(status string) {
 	s.mu.Lock()
 	old := s.currentStatus
 	s.currentStatus = status
@@ -382,25 +390,25 @@ func (s *acpSession) setStatus(status string) {
 	}
 }
 
-func (s *acpSession) touch() {
+func (s *Session) touch() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.lastActivityAt = time.Now()
 }
 
-func (s *acpSession) status() string {
+func (s *Session) status() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.currentStatus
 }
 
-func (s *acpSession) lastActivity() time.Time {
+func (s *Session) lastActivity() time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.lastActivityAt
 }
 
-func (s *acpSession) Status() core.AgentStatus {
+func (s *Session) Status() core.AgentStatus {
 	s.statusMu.Lock()
 	defer s.statusMu.Unlock()
 	st := s.agentStatus
@@ -414,7 +422,7 @@ func (s *acpSession) Status() core.AgentStatus {
 	return st
 }
 
-func (s *acpSession) History() []core.HistoryEntry {
+func (s *Session) History() []core.HistoryEntry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]core.HistoryEntry, len(s.history))
@@ -424,7 +432,7 @@ func (s *acpSession) History() []core.HistoryEntry {
 	return out
 }
 
-func (s *acpSession) resetStatus() {
+func (s *Session) resetStatus() {
 	s.statusMu.Lock()
 	defer s.statusMu.Unlock()
 	model := s.agentStatus.Model
@@ -436,7 +444,7 @@ func (s *acpSession) resetStatus() {
 	s.agentStatus.CurrentToolCommand = ""
 }
 
-func (s *acpSession) startTurnStatus() {
+func (s *Session) startTurnStatus() {
 	s.statusMu.Lock()
 	defer s.statusMu.Unlock()
 	model := s.agentStatus.Model
@@ -448,7 +456,7 @@ func (s *acpSession) startTurnStatus() {
 	s.agentStatus.CurrentToolCommand = ""
 }
 
-func (s *acpSession) setToolStatus(active bool, command string) {
+func (s *Session) setToolStatus(active bool, command string) {
 	s.statusMu.Lock()
 	old := s.agentStatus.State
 	if active {
@@ -468,20 +476,20 @@ func (s *acpSession) setToolStatus(active bool, command string) {
 	}
 }
 
-func (s *acpSession) setUsage(pr promptResult) {
+func (s *Session) setUsage(pr promptResult) {
 	s.statusMu.Lock()
 	defer s.statusMu.Unlock()
 	s.agentStatus.InputTokens = pr.Usage.InputTokens
 	s.agentStatus.OutputTokens = pr.Usage.OutputTokens
 }
 
-func (s *acpSession) Close() error {
+func (s *Session) Close() error {
 	if s.tr == nil {
 		return nil
 	}
 	err := s.tr.close()
-	if s.onClose != nil {
-		s.onClose()
+	if s.OnClose != nil {
+		s.OnClose()
 	}
 	return err
 }

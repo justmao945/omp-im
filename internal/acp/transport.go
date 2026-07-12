@@ -1,4 +1,4 @@
-package omp
+package acp
 
 import (
 	"bufio"
@@ -14,8 +14,8 @@ import (
 	"time"
 )
 
-// transport implements a minimal JSON-RPC client over the stdio of an ACP agent.
-type transport struct {
+// Transport implements a minimal JSON-RPC client over the stdio of an ACP agent.
+type Transport struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	stdout io.ReadCloser
@@ -51,7 +51,7 @@ func (e *rpcError) Error() string {
 	return fmt.Sprintf("acp rpc error %d: %s", e.Code, e.Message)
 }
 
-func newTransport(cfg agentConfig, serverReqHandler func(method string, params json.RawMessage) (any, error)) (*transport, error) {
+func NewTransport(cfg Config, serverReqHandler func(method string, params json.RawMessage) (any, error)) (*Transport, error) {
 	cmd := exec.Command(cfg.Command, cfg.Args...)
 	cmd.Dir = cfg.WorkDir
 	if cmd.Dir == "" {
@@ -76,7 +76,7 @@ func newTransport(cfg agentConfig, serverReqHandler func(method string, params j
 		return nil, fmt.Errorf("acp start %s: %w", cfg.Command, err)
 	}
 
-	t := &transport{
+	t := &Transport{
 		cmd:              cmd,
 		stdin:            stdin,
 		stdout:           stdout,
@@ -87,9 +87,9 @@ func newTransport(cfg agentConfig, serverReqHandler func(method string, params j
 	return t, nil
 }
 
-func (t *transport) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+func (t *Transport) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	if t.closed.Load() {
-		return nil, fmt.Errorf("acp transport closed")
+		return nil, fmt.Errorf("acp Transport closed")
 	}
 
 	id := int(t.nextID.Add(1))
@@ -123,9 +123,9 @@ func (t *transport) call(ctx context.Context, method string, params any) (json.R
 	}
 }
 
-func (t *transport) notify(method string, params any) error {
+func (t *Transport) notify(method string, params any) error {
 	if t.closed.Load() {
-		return fmt.Errorf("acp transport closed")
+		return fmt.Errorf("acp Transport closed")
 	}
 	return t.write(rpcMessage{
 		JSONRPC: "2.0",
@@ -134,7 +134,7 @@ func (t *transport) notify(method string, params any) error {
 	})
 }
 
-func (t *transport) write(msg rpcMessage) error {
+func (t *Transport) write(msg rpcMessage) error {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return err
@@ -147,7 +147,7 @@ func (t *transport) write(msg rpcMessage) error {
 	return err
 }
 
-func (t *transport) readLoop() {
+func (t *Transport) readLoop() {
 	scanner := bufio.NewScanner(t.stdout)
 	scanner.Buffer(make([]byte, 4096), 16*1024*1024)
 	for scanner.Scan() {
@@ -198,7 +198,7 @@ func (t *transport) readLoop() {
 	t.closed.Store(true)
 }
 
-func (t *transport) close() error {
+func (t *Transport) close() error {
 	if !t.closed.CompareAndSwap(false, true) {
 		return nil
 	}
@@ -213,7 +213,7 @@ func (t *transport) close() error {
 	t.pending = make(map[int]chan rpcResponse)
 	t.mu.Unlock()
 	for _, ch := range pendingCalls {
-		ch <- rpcResponse{Error: fmt.Errorf("acp transport closed")}
+		ch <- rpcResponse{Error: fmt.Errorf("acp Transport closed")}
 	}
 
 	if t.cmd == nil || t.cmd.Process == nil {
