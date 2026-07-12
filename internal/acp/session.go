@@ -81,6 +81,7 @@ func (s *Session) setModelFromConfigOptions(opts []configOption) {
 		s.statusMu.Lock()
 		s.agentStatus.Model = m
 		s.statusMu.Unlock()
+		slog.Info("acp: model detected", "session", s.sessionKey, "model", m)
 	}
 }
 
@@ -205,7 +206,7 @@ func (s *Session) handshake(ctx context.Context) error {
 	}
 	s.sessionID = sn.SessionID
 	s.setModelFromConfigOptions(sn.ConfigOptions)
-	slog.Debug("acp session created", "session_id", sn.SessionID, "omp_session", s.sessionKey, "model", s.agentStatus.Model)
+	slog.Info("acp session created", "session_id", sn.SessionID, "omp_session", s.sessionKey, "model", s.agentStatus.Model)
 	return nil
 }
 
@@ -230,7 +231,7 @@ func (s *Session) callSessionResume(ctx context.Context) error {
 		s.agentStatus.Model = out.Model
 		s.statusMu.Unlock()
 	}
-	slog.Debug("acp session resumed", "session_id", s.sessionID, "omp_session", s.sessionKey, "model", s.agentStatus.Model)
+	slog.Info("acp session resumed", "session_id", s.sessionID, "omp_session", s.sessionKey, "model", s.agentStatus.Model)
 	return nil
 }
 
@@ -255,7 +256,7 @@ func (s *Session) callSessionLoad(ctx context.Context) error {
 		s.agentStatus.Model = out.Model
 		s.statusMu.Unlock()
 	}
-	slog.Debug("acp session loaded", "session_id", s.sessionID, "omp_session", s.sessionKey, "model", s.agentStatus.Model)
+	slog.Info("acp session loaded", "session_id", s.sessionID, "omp_session", s.sessionKey, "model", s.agentStatus.Model)
 	return nil
 }
 
