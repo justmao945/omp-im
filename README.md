@@ -105,6 +105,21 @@ Send these commands in any Weixin conversation:
 - Images attached to Weixin messages are forwarded as ACP image content blocks.
 - Files/images created by the agent during a turn are sent back to Weixin automatically.
 
+## Development
+
+This project depends on `github.com/skip2/go-qrcode` for terminal QR-code output. If the default Go module proxy is slow or unreachable, use a domestic mirror:
+
+```bash
+GOPROXY=https://goproxy.cn go mod download
+GOPROXY=https://goproxy.cn go build ./...
+```
+
+Or set it globally:
+
+```bash
+go env -w GOPROXY=https://goproxy.cn,direct
+```
+
 ## Current scope
 
 - Text messages: ✅
