@@ -327,6 +327,46 @@ func TestEngineListCommand(t *testing.T) {
 	}
 }
 
+func TestEngineHelpCommand(t *testing.T) {
+	eng, _ := newTestEngine("fake")
+	p := &fakePlatform{name: "fake"}
+	eng.AddPlatform(p)
+
+	go func() {
+		for p.getHandler() == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+		p.getHandler()(p, &Message{
+			SessionKey: "fake:u1",
+			Platform:   "fake",
+			UserID:     "u1",
+			Content:    "/help",
+			ReplyCtx:   "ctx",
+		})
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		_ = eng.Run()
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	_ = eng.Stop()
+	<-done
+
+	p.mu.Lock()
+	replies := append([]string(nil), p.replies...)
+	p.mu.Unlock()
+
+	if len(replies) != 1 {
+		t.Fatalf("got %d replies, want 1", len(replies))
+	}
+	if !strings.Contains(replies[0], "/agent") {
+		t.Fatalf("help reply = %q", replies[0])
+	}
+}
+
 func TestEngineUnknownCommand(t *testing.T) {
 	eng, _ := newTestEngine("fake")
 	p := &fakePlatform{name: "fake"}

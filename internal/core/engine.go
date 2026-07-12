@@ -263,6 +263,8 @@ func (e *Engine) handleCommand(ctx context.Context, p Platform, msg *Message, cm
 		e.handleProjCommand(ctx, p, msg, cmd.arg)
 	case "list":
 		e.handleListCommand(ctx, p, msg)
+	case "help", "?":
+		e.handleHelpCommand(ctx, p, msg)
 	default:
 		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("未知命令: /%s", cmd.name))
 	}
@@ -337,6 +339,16 @@ func (e *Engine) handleListCommand(ctx context.Context, p Platform, msg *Message
 		lines = append(lines, "（无）")
 	}
 	_ = p.Reply(ctx, msg.ReplyCtx, strings.Join(lines, "\n"))
+}
+
+func (e *Engine) handleHelpCommand(ctx context.Context, p Platform, msg *Message) {
+	_ = p.Reply(ctx, msg.ReplyCtx, `可用命令：
+/agent — 显示当前 agent 和可用 agents
+/agent <name> — 切换到指定 agent
+/proj — 显示当前 project 和可用 projects
+/proj <name> — 切换到指定 project
+/list — 列出当前 agent 的 active sessions
+/help, /? — 显示本帮助`)
 }
 
 func (e *Engine) sessionAgent(sessionKey string) string {
