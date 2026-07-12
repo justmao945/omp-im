@@ -144,6 +144,20 @@ func TestStatusSnapshotPreservesSessionFields(t *testing.T) {
 	}
 }
 
+func TestExtractToolCommandFromRawInput(t *testing.T) {
+	params := []byte(`{"update":{"sessionUpdate":"tool_call","toolCallId":"1","kind":"execute","rawInput":{"command":"ls -la","workdir":"/tmp"}}}`)
+	if got := toolCallCommand(params); got != "ls -la" {
+		t.Fatalf("command = %q, want %q", got, "ls -la")
+	}
+	params = []byte(`{"update":{"sessionUpdate":"tool_call","toolCallId":"2","kind":"read","rawInput":{"path":"/etc/passwd"}}}`)
+	if got := toolCallPath(params); got != "/etc/passwd" {
+		t.Fatalf("path = %q, want %q", got, "/etc/passwd")
+	}
+	if got := extractToolRawInput(params); got == "" {
+		t.Fatal("raw input empty")
+	}
+}
+
 func TestExtractAgentThought(t *testing.T) {
 	params := []byte(`{"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"I should check the file first."}}}`)
 	if got := extractAgentThought(params); got != "I should check the file first." {

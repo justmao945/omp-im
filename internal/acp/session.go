@@ -778,15 +778,27 @@ func toolCallCommand(params json.RawMessage) string {
 	if err := json.Unmarshal(params, &wrap); err != nil {
 		return ""
 	}
+	var head struct {
+		RawInput json.RawMessage `json:"rawInput"`
+	}
+	_ = json.Unmarshal(wrap.Update, &head)
+	return extractCommandFromRawInput(head.RawInput)
+}
+
+func extractCommandFromRawInput(raw json.RawMessage) string {
 	var input struct {
 		Command string `json:"command"`
 		Cmd     string `json:"cmd"`
+		Name    string `json:"name"`
 	}
-	_ = json.Unmarshal(wrap.Update, &input)
+	_ = json.Unmarshal(raw, &input)
 	if input.Command != "" {
 		return input.Command
 	}
-	return input.Cmd
+	if input.Cmd != "" {
+		return input.Cmd
+	}
+	return input.Name
 }
 
 func toolCallPath(params json.RawMessage) string {

@@ -128,12 +128,15 @@ func (p *Platform) StreamEvent(ctx context.Context, replyCtx any, ev core.Stream
 }
 
 // renderStream builds the current stream content and sends it to WeCom.
+// Non-final updates are throttled to at most one render per second.
 func (p *Platform) renderStream(ctx context.Context, rc *replyContext, finished bool) error {
 	if rc.streamID == "" {
 		rc.streamID = generateReqID()
 	}
 	if finished {
 		rc.turnEnd = time.Now()
+	} else if !rc.lastRender.IsZero() && time.Since(rc.lastRender) < time.Second {
+		return nil
 	}
 
 	content := buildStreamContent(rc, p.cfg.thinkingDisplay, p.cfg.toolDisplay, finished)
@@ -155,6 +158,7 @@ func (p *Platform) renderStream(ctx context.Context, rc *replyContext, finished 
 			return err
 		}
 	}
+	rc.lastRender = time.Now()
 	if finished {
 		slog.Debug("wecom: finished stream reply")
 	}

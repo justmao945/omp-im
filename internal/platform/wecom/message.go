@@ -69,6 +69,7 @@ type replyContext struct {
 	toolHistory      []toolRecord
 	turnStart        time.Time
 	turnEnd          time.Time
+	lastRender       time.Time
 }
 
 // wsFrame is the top-level envelope received over the WebSocket.
