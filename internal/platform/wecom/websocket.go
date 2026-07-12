@@ -3,6 +3,7 @@ package wecom
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -20,7 +21,22 @@ const (
 	defaultHeartbeatInterval = 30 * time.Second
 	defaultReconnectDelay    = 5 * time.Second
 	maxReconnectAttempts     = 10
+
+	wsAckTimeout       = 10 * time.Second
+	wsMediaAckTimeout  = 30 * time.Second
+	wsUploadChunkSize  = 512 << 10
+	wsUploadMaxChunks  = 100
+	wsUploadMaxBytes   = wsUploadChunkSize * wsUploadMaxChunks // 50 MB
 )
+
+// errWSAckTimeout is returned when the server does not acknowledge a frame in time.
+var errWSAckTimeout = errors.New("wecom: ack timeout")
+
+// wsAckResult carries a server response frame or an error for a pending request.
+type wsAckResult struct {
+	frame wsFrame
+	err   error
+}
 
 // wsClient manages a WebSocket connection to the WeCom AI bot gateway.
 type wsClient struct {
@@ -29,7 +45,11 @@ type wsClient struct {
 
 	conn     *websocket.Conn
 	connMu   sync.RWMutex
+	writeMu  sync.Mutex
 	stopCh   chan struct{}
+
+	pendingMu   sync.Mutex
+	pendingAcks map[string]chan wsAckResult
 
 	// sendFn is used in tests to stub outbound sends.
 	sendFn func(map[string]interface{}) error
@@ -40,6 +60,7 @@ func newWSClient(cfg *config, recvHandler func(*wsFrame)) *wsClient {
 		cfg:         cfg,
 		recvHandler: recvHandler,
 		stopCh:      make(chan struct{}),
+		pendingAcks: make(map[string]chan wsAckResult),
 	}
 }
 
@@ -125,11 +146,12 @@ func (c *wsClient) connectAndServe(ctx context.Context) error {
 		conn.Close()
 		localWg.Wait()
 		c.clearConn()
+		c.failAllAcksLocked(fmt.Errorf("wecom: connection stopped"))
 		return nil
 	case <-connDone:
-		// readLoop exited; heartbeatLoop will exit once its next tick or ping fails.
 		localWg.Wait()
 		c.clearConn()
+		c.failAllAcksLocked(fmt.Errorf("wecom: connection closed"))
 		return fmt.Errorf("connection closed")
 	}
 }
@@ -180,14 +202,17 @@ func (c *wsClient) readLoop(conn *websocket.Conn, done chan<- struct{}) {
 				return
 			default:
 			}
-			// "continuation after FIN" is a server-side framing issue; reconnecting
-			// is the only recovery. We log at WARN because it is usually transient.
 			lvl := slog.LevelWarn
 			if websocket.IsUnexpectedCloseError(err) {
 				lvl = slog.LevelDebug
 			}
 			slog.Log(nil, lvl, "wecom: read websocket error, reconnecting", "error", err)
 			return
+		}
+
+		reqID, hasReqID := frame.Headers["req_id"]
+		if hasReqID && c.dispatchAck(reqID, wsAckResult{frame: frame, err: nil}) {
+			continue
 		}
 
 		if c.recvHandler != nil {
@@ -198,8 +223,6 @@ func (c *wsClient) readLoop(conn *websocket.Conn, done chan<- struct{}) {
 
 func (c *wsClient) heartbeatLoop(conn *websocket.Conn, done <-chan struct{}) {
 	defer func() {
-		// Ensure the connection is closed if the heartbeat loop exits, so the
-		// readLoop and connectAndServe notice and clean up.
 		conn.Close()
 	}()
 
@@ -231,7 +254,7 @@ func (c *wsClient) ping(conn *websocket.Conn) error {
 	return c.writeJSON(conn, frame)
 }
 
-// send sends a message frame via the current connection.
+// send sends a message frame via the current connection without waiting for an ack.
 func (c *wsClient) send(payload map[string]interface{}) error {
 	if c.sendFn != nil {
 		return c.sendFn(payload)
@@ -243,12 +266,118 @@ func (c *wsClient) send(payload map[string]interface{}) error {
 	return c.writeJSON(conn, payload)
 }
 
+// writeJSON sends a JSON message over the WebSocket connection with mutex protection.
 func (c *wsClient) writeJSON(conn *websocket.Conn, v interface{}) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	data, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
 	return conn.WriteMessage(websocket.TextMessage, data)
+}
+
+// writeAndWaitAck sends a frame and waits for a server ack, returning any ack error.
+func (c *wsClient) writeAndWaitAck(ctx context.Context, frame map[string]interface{}, reqID string) error {
+	result, err := c.writeAndWaitResult(ctx, frame, reqID, wsAckTimeout)
+	if errors.Is(err, errWSAckTimeout) {
+		slog.Debug("wecom: ack timeout, proceeding", "req_id", reqID)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return result.err
+}
+
+// writeAndWaitFrameWithTimeout sends a frame and waits for the response body.
+func (c *wsClient) writeAndWaitFrameWithTimeout(ctx context.Context, frame map[string]interface{}, reqID string, timeout time.Duration) (wsFrame, error) {
+	result, err := c.writeAndWaitResult(ctx, frame, reqID, timeout)
+	if errors.Is(err, errWSAckTimeout) {
+		return wsFrame{}, fmt.Errorf("wecom: ack timeout waiting for %s", reqID)
+	}
+	if err != nil {
+		return wsFrame{}, err
+	}
+	if result.err != nil {
+		return wsFrame{}, result.err
+	}
+	return result.frame, nil
+}
+
+// writeAndWaitResult sends a frame and waits for the server to respond with the same req_id.
+func (c *wsClient) writeAndWaitResult(ctx context.Context, frame map[string]interface{}, reqID string, timeout time.Duration) (wsAckResult, error) {
+	if c.sendFn != nil {
+		return wsAckResult{}, fmt.Errorf("wecom: writeAndWait not supported with sendFn")
+	}
+
+	ch := make(chan wsAckResult, 1)
+	c.pendingMu.Lock()
+	c.pendingAcks[reqID] = ch
+	c.pendingMu.Unlock()
+
+	conn := c.currentConn()
+	if conn == nil {
+		c.pendingMu.Lock()
+		delete(c.pendingAcks, reqID)
+		c.pendingMu.Unlock()
+		return wsAckResult{}, fmt.Errorf("wecom: not connected")
+	}
+	if err := c.writeJSON(conn, frame); err != nil {
+		c.pendingMu.Lock()
+		delete(c.pendingAcks, reqID)
+		c.pendingMu.Unlock()
+		return wsAckResult{}, err
+	}
+
+	select {
+	case result := <-ch:
+		return result, nil
+	case <-ctx.Done():
+		c.pendingMu.Lock()
+		delete(c.pendingAcks, reqID)
+		c.pendingMu.Unlock()
+		return wsAckResult{}, ctx.Err()
+	case <-time.After(timeout):
+		c.pendingMu.Lock()
+		delete(c.pendingAcks, reqID)
+		c.pendingMu.Unlock()
+		return wsAckResult{}, errWSAckTimeout
+	}
+}
+
+// dispatchAck routes a server response frame to a pending request channel.
+func (c *wsClient) dispatchAck(reqID string, result wsAckResult) bool {
+	c.pendingMu.Lock()
+	ch, ok := c.pendingAcks[reqID]
+	if ok {
+		delete(c.pendingAcks, reqID)
+	}
+	c.pendingMu.Unlock()
+	if !ok {
+		return false
+	}
+
+	// Server response frames have no cmd and carry errcode/errmsg in the body for some commands.
+	if result.err == nil && !result.frame.isSuccess() {
+		result.err = fmt.Errorf("wecom: ack error: errcode=%d errmsg=%s", result.frame.ErrCode, result.frame.ErrMsg)
+	}
+	ch <- result
+	return true
+}
+
+// failAllAcksLocked fails all pending acks. Caller must hold no locks that c.pendingMu depends on.
+func (c *wsClient) failAllAcksLocked(err error) {
+	c.pendingMu.Lock()
+	pending := make(map[string]chan wsAckResult, len(c.pendingAcks))
+	for k, v := range c.pendingAcks {
+		pending[k] = v
+	}
+	c.pendingAcks = make(map[string]chan wsAckResult)
+	c.pendingMu.Unlock()
+	for _, ch := range pending {
+		ch <- wsAckResult{err: err}
+	}
 }
 
 func (c *wsClient) currentConn() *websocket.Conn {
@@ -269,6 +398,7 @@ func (c *wsClient) stop() error {
 	if conn := c.currentConn(); conn != nil {
 		conn.Close()
 	}
+	c.failAllAcksLocked(fmt.Errorf("wecom: stopped"))
 	return nil
 }
 
