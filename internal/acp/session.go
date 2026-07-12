@@ -319,12 +319,9 @@ func (s *Session) Respond(ctx context.Context, prompt string, images []core.Imag
 	blocks := []any{map[string]any{"type": "text", "text": prompt}}
 	for _, img := range images {
 		blocks = append(blocks, map[string]any{
-			"type": "image",
-			"source": map[string]any{
-				"type":      "base64",
-				"mediaType": imageMimeType(img.MimeType),
-				"data":      base64.StdEncoding.EncodeToString(img.Data),
-			},
+			"type":     "image",
+			"data":     base64.StdEncoding.EncodeToString(img.Data),
+			"mimeType": imageMimeType(img.MimeType),
 		})
 	}
 	params := map[string]any{
