@@ -49,6 +49,49 @@ type toolCall struct {
 	Path string
 }
 
+type configOption struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Category     string `json:"category"`
+	Type         string `json:"type"`
+	CurrentValue any    `json:"currentValue"`
+}
+
+func extractModel(opts []configOption) string {
+	for _, opt := range opts {
+		if opt.Category == "model" || opt.ID == "model" {
+			if s, ok := opt.CurrentValue.(string); ok {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+func (s *acpSession) setModelFromConfigOptions(opts []configOption) {
+	if m := extractModel(opts); m != "" {
+		s.statusMu.Lock()
+		s.agentStatus.Model = m
+		s.statusMu.Unlock()
+	}
+}
+
+func extractConfigOptionUpdate(params json.RawMessage) []configOption {
+	var wrap struct {
+		Update struct {
+			SessionUpdate string         `json:"sessionUpdate"`
+			ConfigOptions []configOption `json:"configOptions"`
+		} `json:"update"`
+	}
+	if err := json.Unmarshal(params, &wrap); err != nil {
+		return nil
+	}
+	if wrap.Update.SessionUpdate != "config_option_update" {
+		return nil
+	}
+	return wrap.Update.ConfigOptions
+}
+
 // promptResult is returned by session/prompt.
 type promptResult struct {
 	StopReason string `json:"stopReason"`
@@ -143,7 +186,8 @@ func (s *acpSession) handshake(ctx context.Context) error {
 		return fmt.Errorf("acp session/new: %w", err)
 	}
 	var sn struct {
-		SessionID string `json:"sessionId"`
+		SessionID    string         `json:"sessionId"`
+		ConfigOptions []configOption `json:"configOptions"`
 	}
 	if err := json.Unmarshal(newRes, &sn); err != nil {
 		return fmt.Errorf("acp parse session/new: %w", err)
@@ -152,7 +196,8 @@ func (s *acpSession) handshake(ctx context.Context) error {
 		return fmt.Errorf("acp session/new returned empty sessionId")
 	}
 	s.sessionID = sn.SessionID
-	slog.Debug("acp session created", "session_id", sn.SessionID, "omp_session", s.sessionKey)
+	s.setModelFromConfigOptions(sn.ConfigOptions)
+	slog.Debug("acp session created", "session_id", sn.SessionID, "omp_session", s.sessionKey, "model", s.agentStatus.Model)
 	return nil
 }
 
@@ -165,10 +210,19 @@ func (s *acpSession) callSessionResume(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	var out struct {
+		ConfigOptions []configOption `json:"configOptions"`
+		Model         string         `json:"model"`
+	}
+	_ = json.Unmarshal(res, &out)
 	s.sessionID = s.resumeSessionID
-	// The response may include session configuration; ignore unknown fields.
-	_ = res
-	slog.Debug("acp session resumed", "session_id", s.sessionID, "omp_session", s.sessionKey)
+	s.setModelFromConfigOptions(out.ConfigOptions)
+	if out.Model != "" {
+		s.statusMu.Lock()
+		s.agentStatus.Model = out.Model
+		s.statusMu.Unlock()
+	}
+	slog.Debug("acp session resumed", "session_id", s.sessionID, "omp_session", s.sessionKey, "model", s.agentStatus.Model)
 	return nil
 }
 
@@ -181,9 +235,19 @@ func (s *acpSession) callSessionLoad(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	var out struct {
+		ConfigOptions []configOption `json:"configOptions"`
+		Model         string         `json:"model"`
+	}
+	_ = json.Unmarshal(res, &out)
 	s.sessionID = s.resumeSessionID
-	_ = res
-	slog.Debug("acp session loaded", "session_id", s.sessionID, "omp_session", s.sessionKey)
+	s.setModelFromConfigOptions(out.ConfigOptions)
+	if out.Model != "" {
+		s.statusMu.Lock()
+		s.agentStatus.Model = out.Model
+		s.statusMu.Unlock()
+	}
+	slog.Debug("acp session loaded", "session_id", s.sessionID, "omp_session", s.sessionKey, "model", s.agentStatus.Model)
 	return nil
 }
 
@@ -235,6 +299,9 @@ func (s *acpSession) Respond(ctx context.Context, prompt string, images []core.I
 				mu.Lock()
 				textParts = append(textParts, text)
 				mu.Unlock()
+			}
+			if opts := extractConfigOptionUpdate(params); len(opts) > 0 {
+				s.setModelFromConfigOptions(opts)
 			}
 			if hasToolCall(params) {
 				cmd := ""
