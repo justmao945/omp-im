@@ -11,20 +11,23 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
-	"github.com/justmao945/omp-im/internal/config"
 	"github.com/justmao945/omp-im/internal/core"
 )
 
 // acpSession is a single ACP conversation session with the omp agent.
 type acpSession struct {
-	cfg        config.AgentConfig
+	cfg        agentConfig
 	sessionKey string
 	tr         *transport
 
-	mu        sync.Mutex
-	sessionID string
-	history   []historyEntry
+	mu            sync.Mutex
+	sessionID     string
+	history       []historyEntry
+	currentStatus string
+	lastActivityAt time.Time
+	onClose       func()
 }
 
 type historyEntry struct {
@@ -47,11 +50,13 @@ type promptResult struct {
 	} `json:"usage"`
 }
 
-func newACPSession(ctx context.Context, cfg config.AgentConfig, sessionKey string, tr *transport) (*acpSession, error) {
+func newACPSession(ctx context.Context, cfg agentConfig, sessionKey string, tr *transport) (*acpSession, error) {
 	s := &acpSession{
-		cfg:        cfg,
-		sessionKey: sessionKey,
-		tr:         tr,
+		cfg:           cfg,
+		sessionKey:    sessionKey,
+		tr:            tr,
+		currentStatus: "idle",
+		lastActivityAt: time.Now(),
 	}
 	if err := s.handshake(ctx); err != nil {
 		return nil, err
@@ -118,6 +123,8 @@ func (s *acpSession) Respond(ctx context.Context, prompt string, images []core.I
 	if s.sessionID == "" {
 		return "", nil, fmt.Errorf("acp: no session id")
 	}
+	s.setStatus("busy")
+	defer s.setStatus("idle")
 
 	blocks := []any{map[string]any{"type": "text", "text": prompt}}
 	for _, img := range images {
@@ -199,14 +206,44 @@ func (s *acpSession) Respond(ctx context.Context, prompt string, images []core.I
 
 	s.history = append(s.history, historyEntry{Role: "user", Content: prompt})
 	s.history = append(s.history, historyEntry{Role: "assistant", Content: reply})
+	s.touch()
 	return reply, attachments, nil
+}
+
+func (s *acpSession) setStatus(status string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.currentStatus = status
+	s.lastActivityAt = time.Now()
+}
+
+func (s *acpSession) touch() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastActivityAt = time.Now()
+}
+
+func (s *acpSession) status() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.currentStatus
+}
+
+func (s *acpSession) lastActivity() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastActivityAt
 }
 
 func (s *acpSession) Close() error {
 	if s.tr == nil {
 		return nil
 	}
-	return s.tr.close()
+	err := s.tr.close()
+	if s.onClose != nil {
+		s.onClose()
+	}
+	return err
 }
 
 func imageMimeType(mt string) string {

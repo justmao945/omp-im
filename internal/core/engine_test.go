@@ -29,6 +29,9 @@ func (a *fakeAgent) StartSession(ctx context.Context, sessionKey string, project
 	a.mu.Unlock()
 	return &fakeSession{reply: a.reply, attachments: a.attachments, project: project}, nil
 }
+func (a *fakeAgent) ListSessions(ctx context.Context) ([]SessionInfo, error) {
+	return []SessionInfo{}, nil
+}
 
 func (a *fakeAgent) Started() int {
 	a.mu.Lock()

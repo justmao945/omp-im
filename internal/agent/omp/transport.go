@@ -10,8 +10,6 @@ import (
 	"os/exec"
 	"sync"
 	"sync/atomic"
-
-	"github.com/justmao945/omp-im/internal/config"
 )
 
 // transport implements a minimal JSON-RPC client over the stdio of an ACP agent.
@@ -51,7 +49,7 @@ func (e *rpcError) Error() string {
 	return fmt.Sprintf("acp rpc error %d: %s", e.Code, e.Message)
 }
 
-func newTransport(cfg config.AgentConfig, serverReqHandler func(method string, params json.RawMessage) (any, error)) (*transport, error) {
+func newTransport(cfg agentConfig, serverReqHandler func(method string, params json.RawMessage) (any, error)) (*transport, error) {
 	cmd := exec.Command(cfg.Command, cfg.Args...)
 	cmd.Dir = cfg.WorkDir
 	if cmd.Dir == "" {

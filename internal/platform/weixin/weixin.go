@@ -40,7 +40,6 @@ type Platform struct {
 	allowFrom  string
 	routeTag   string
 	stateDir   string
-	longPollMS int
 
 	api           *apiClient
 	httpClient    *http.Client
@@ -79,10 +78,19 @@ func sanitizePathSegment(s string) string {
 	return b.String()
 }
 
+func defaultDataDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".", ".omp-im")
+	}
+	return filepath.Join(home, ".omp-im")
+}
+
 // New constructs a Weixin platform.
 // If options.token is provided, it is used directly. Otherwise the platform loads
-// a saved session from state_dir/session.json or prompts for QR-code login.
-// Optional: base_url, allow_from, route_tag, account_id, long_poll_timeout_ms, state_dir, proxy.
+// a saved session from ~/.omp-im/weixin/<account>/session.json or prompts for
+// QR-code login.
+// Optional: base_url, allow_from, route_tag, account_id, proxy.
 func New(opts map[string]any) (*Platform, error) {
 	token, _ := opts["token"].(string)
 	allowFrom, _ := opts["allow_from"].(string)
@@ -99,17 +107,8 @@ func New(opts map[string]any) (*Platform, error) {
 	if accountLabel == "" {
 		accountLabel = "default"
 	}
-	lp := pickInt(opts["long_poll_timeout_ms"])
 
-	stateDir, _ := opts["state_dir"].(string)
-	if strings.TrimSpace(stateDir) == "" {
-		if dataDir, _ := opts["data_dir"].(string); dataDir != "" {
-			stateDir = filepath.Join(dataDir, "weixin", sanitizePathSegment(accountLabel))
-		}
-	}
-	if stateDir == "" {
-		stateDir = filepath.Join(".", "data", "weixin", sanitizePathSegment(accountLabel))
-	}
+	stateDir := filepath.Join(defaultDataDir(), "weixin", sanitizePathSegment(accountLabel))
 
 	httpClient := &http.Client{Timeout: defaultAPITimeout}
 	if proxyURL, _ := opts["proxy"].(string); proxyURL != "" {
@@ -132,7 +131,6 @@ func New(opts map[string]any) (*Platform, error) {
 		allowFrom:     allowFrom,
 		routeTag:      routeTag,
 		stateDir:      stateDir,
-		longPollMS:    lp,
 		dedup:         make(map[string]time.Time),
 		cdnHTTPClient: cdnHTTPClient,
 	}
@@ -163,19 +161,6 @@ func New(opts map[string]any) (*Platform, error) {
 	}
 
 	return p, nil
-}
-
-func pickInt(v any) int {
-	switch x := v.(type) {
-	case int:
-		return x
-	case int64:
-		return int(x)
-	case float64:
-		return int(x)
-	default:
-		return 0
-	}
 }
 
 func (p *Platform) Name() string { return "weixin" }
@@ -312,7 +297,7 @@ func (p *Platform) pollLoop(ctx context.Context) {
 
 		buf := p.syncBuf()
 
-		resp, err := p.api.getUpdates(ctx, buf, p.longPollMS)
+		resp, err := p.api.getUpdates(ctx, buf, 0)
 		if err != nil {
 			if ctx.Err() != nil {
 				return

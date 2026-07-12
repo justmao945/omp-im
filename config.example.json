@@ -1,13 +1,5 @@
 {
-  "agents": [
-    {
-      "name": "omp",
-      "type": "omp",
-      "command": "omp",
-      "args": ["acp"],
-      "auto_approve_tools": true
-    }
-  ],
+  "agents": ["omp"],
   "projects": [
     {
       "name": "default",
@@ -22,9 +14,7 @@
     {
       "type": "weixin",
       "options": {
-        "state_dir": "./data/weixin/default",
-        "allow_from": "*",
-        "long_poll_timeout_ms": 35000
+        "allow_from": "*"
       }
     }
   ]

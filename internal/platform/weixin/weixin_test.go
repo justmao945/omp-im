@@ -74,17 +74,3 @@ func TestSanitizePathSegment(t *testing.T) {
 	}
 }
 
-func TestPickInt(t *testing.T) {
-	if pickInt(int(3)) != 3 {
-		t.Errorf("pickInt(int)")
-	}
-	if pickInt(int64(3)) != 3 {
-		t.Errorf("pickInt(int64)")
-	}
-	if pickInt(float64(3)) != 3 {
-		t.Errorf("pickInt(float64)")
-	}
-	if pickInt("x") != 0 {
-		t.Errorf("pickInt(string)")
-	}
-}

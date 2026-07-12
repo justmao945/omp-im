@@ -310,27 +310,32 @@ func (e *Engine) handleProjCommand(ctx context.Context, p Platform, msg *Message
 
 func (e *Engine) handleListCommand(ctx context.Context, p Platform, msg *Message) {
 	currentAgent := e.sessionAgent(msg.SessionKey)
-	e.sessionsMu.Lock()
+	agent, ok := e.agents[currentAgent]
+	if !ok {
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("未知 agent: %s", currentAgent))
+		return
+	}
+	infos, err := agent.ListSessions(ctx)
+	if err != nil {
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("无法读取 sessions: %v", err))
+		return
+	}
 	var lines []string
 	lines = append(lines, fmt.Sprintf("Agent %s 的 sessions:", currentAgent))
-	for key, ent := range e.sessions {
-		if ent.agent != currentAgent {
-			continue
-		}
-		status := ent.status
+	for _, info := range infos {
+		status := info.Status
 		if status == "" {
 			status = "idle"
 		}
-		proj := ent.project
+		proj := info.Project
 		if proj == "" {
 			proj = e.defaultProject
 		}
-		lines = append(lines, fmt.Sprintf("- %s [project=%s status=%s last=%s]", key, proj, status, ent.lastActivity.Format("15:04:05")))
+		lines = append(lines, fmt.Sprintf("- %s [project=%s status=%s last=%s]", info.SessionKey, proj, status, info.LastActivity.Format("15:04:05")))
 	}
 	if len(lines) == 1 {
 		lines = append(lines, "（无）")
 	}
-	e.sessionsMu.Unlock()
 	_ = p.Reply(ctx, msg.ReplyCtx, strings.Join(lines, "\n"))
 }
 
