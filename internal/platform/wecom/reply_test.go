@@ -183,7 +183,7 @@ func TestBuildStreamContent(t *testing.T) {
 			},
 		},
 		{
-			name:     "detailed tool footer",
+			name:     "detailed tool footer summary only",
 			thinking: "off",
 			tool:     "detailed",
 			finished: true,
@@ -201,7 +201,8 @@ func TestBuildStreamContent(t *testing.T) {
 					end:    time.Now().Add(-2 * time.Second),
 				}}
 			},
-			wantContains: []string{"cat", "path", "root:x"},
+			wantContains:   []string{"result", "1 tool", "3s"},
+			wantNotContain: "root:x",
 		},
 	}
 	for _, tc := range cases {
@@ -260,7 +261,7 @@ func TestStreamFooter(t *testing.T) {
 			wantNotContain: "tools",
 		},
 		{
-			name:     "detailed tool footer",
+			name:     "detailed tool footer summary only",
 			thinking: "off",
 			tool:     "detailed",
 			setup: func(rc *replyContext) {
@@ -276,7 +277,8 @@ func TestStreamFooter(t *testing.T) {
 					end:    time.Now().Add(-2 * time.Second),
 				}}
 			},
-			wantContains: []string{"cat", "path", "root:x"},
+			wantContains:   []string{"1 tool", "3s", "total", "10s"},
+			wantNotContain: "root:x",
 		},
 	}
 	for _, tc := range cases {

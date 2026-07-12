@@ -254,9 +254,13 @@ func buildStreamContent(rc *replyContext, thinkingDisplay, toolDisplay string, f
 				elapsed = fmt.Sprintf(" %s", formatDuration(time.Since(rc.toolStart)))
 			}
 			line := fmt.Sprintf("🔧 %s%s", rc.toolName, elapsed)
-			if toolDisplay == "detailed" && rc.toolHistory != nil {
+			if rc.toolHistory != nil {
 				if n := len(rc.toolHistory); n > 0 {
-					if preview := truncateText(rc.toolHistory[n-1].input, 120); preview != "" {
+					maxPreview := 120
+					if toolDisplay == "detailed" {
+						maxPreview = 300
+					}
+					if preview := truncateText(rc.toolHistory[n-1].input, maxPreview); preview != "" {
 						line += "\n```\n" + preview + "\n```"
 					}
 				}
@@ -317,15 +321,11 @@ func buildStreamFooter(rc *replyContext, thinkingDisplay, toolDisplay string) st
 	}
 
 	footer := "> " + strings.Join(items, " · ")
-	if toolDisplay == "detailed" {
-		if details := buildToolDetails(rc); details != "" {
-			footer += "\n\n" + details
-		}
-	}
 	return footer
 }
 
 // buildToolDetails renders a detailed log of every tool call for the footer.
+// Currently unused: footer only shows the summary line regardless of toolDisplay.
 func buildToolDetails(rc *replyContext) string {
 	if len(rc.toolHistory) == 0 {
 		return ""
