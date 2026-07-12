@@ -480,6 +480,9 @@ func (e *Engine) handlePCommand(ctx context.Context, p Platform, msg *Message) {
 	}
 
 	st := ent.session.Status()
+	if st.Model != "" {
+		lines = append(lines, fmt.Sprintf("模型: %s", st.Model))
+	}
 	lines = append(lines, fmt.Sprintf("状态: %s", st.State))
 	if st.TurnDuration > 0 {
 		lines = append(lines, fmt.Sprintf("已进行: %s", formatDuration(st.TurnDuration)))
@@ -487,44 +490,59 @@ func (e *Engine) handlePCommand(ctx context.Context, p Platform, msg *Message) {
 	if st.ToolCount > 0 {
 		lines = append(lines, fmt.Sprintf("已调用工具: %d", st.ToolCount))
 		if st.CurrentToolDuration > 0 {
-			lines = append(lines, fmt.Sprintf("当前工具已用时: %s", formatDuration(st.CurrentToolDuration)))
+			lines = append(lines, fmt.Sprintf("当前工具: %s", formatDuration(st.CurrentToolDuration)))
 		}
+	}
+	if st.CurrentToolCommand != "" {
+		lines = append(lines, fmt.Sprintf("命令: %s", truncate(st.CurrentToolCommand, 120)))
 	}
 	if st.InputTokens > 0 || st.OutputTokens > 0 {
 		lines = append(lines, fmt.Sprintf("Tokens: %d / %d", st.InputTokens, st.OutputTokens))
-	}
-	if st.Model != "" {
-		lines = append(lines, fmt.Sprintf("模型: %s", st.Model))
+		total := st.InputTokens + st.OutputTokens
+		if pct, known := contextUsagePercent(total, st.Model); known {
+			lines = append(lines, fmt.Sprintf("上下文: 约 %d%% (基于 %d 上下文窗口)", pct, knownContextWindow(st.Model)))
+		} else {
+			lines = append(lines, fmt.Sprintf("上下文: %d tokens", total))
+		}
 	}
 	if st.ReasoningEffort != "" {
 		lines = append(lines, fmt.Sprintf("思考强度: %s", st.ReasoningEffort))
 	}
 
-	history := ent.session.History()
-	if len(history) > 0 {
-		turns := len(history) / 2
-		lines = append(lines, fmt.Sprintf("上下文: %d 轮", turns))
-		const maxShown = 6 // 3 turns
-		start := 0
-		if len(history) > maxShown {
-			start = len(history) - maxShown
-			lines = append(lines, "...")
-		}
-		for i := start; i < len(history); i++ {
-			h := history[i]
-			prefix := "[U]"
-			if h.Role == "assistant" {
-				prefix = "[A]"
-			}
-			content := h.Content
-			content = truncate(content, 60)
-			lines = append(lines, fmt.Sprintf("%s %s", prefix, content))
-		}
-	} else {
-		lines = append(lines, "上下文: 空")
-	}
-
 	_ = p.Reply(ctx, msg.ReplyCtx, strings.Join(lines, "\n"))
+}
+
+func knownContextWindow(model string) int {
+	m := strings.ToLower(model)
+	switch {
+	case strings.Contains(m, "claude-3"):
+		return 200000
+	case strings.Contains(m, "gpt-4o") || strings.Contains(m, "gpt-4-turbo"):
+		return 128000
+	case strings.Contains(m, "gpt-4"):
+		return 8192
+	case strings.Contains(m, "gpt-3.5-turbo"):
+		return 16384
+	case strings.Contains(m, "kimi"):
+		return 200000
+	default:
+		return 0
+	}
+}
+
+func contextUsagePercent(tokens int, model string) (int, bool) {
+	window := knownContextWindow(model)
+	if window <= 0 || tokens < 0 {
+		return 0, false
+	}
+	pct := tokens * 100 / window
+	if pct < 1 && tokens > 0 {
+		pct = 1
+	}
+	if pct > 100 {
+		pct = 100
+	}
+	return pct, true
 }
 
 func (e *Engine) handleNewCommand(ctx context.Context, p Platform, msg *Message) {

@@ -176,11 +176,11 @@ func (s *acpSession) Respond(ctx context.Context, prompt string, images []core.I
 					cmd = toolCallCommand(params)
 				}
 				slog.Info("acp: tool call started", "session", s.sessionKey, "kind", toolCallKind(params), "path", toolCallPath(params), "command", truncate(cmd, 200))
-				s.setToolStatus(true)
+				s.setToolStatus(true, cmd)
 			}
 			if isToolCallCompleted(params) {
 				slog.Info("acp: tool call completed", "session", s.sessionKey)
-				s.setToolStatus(false)
+				s.setToolStatus(false, "")
 			}
 			collectToolCall(params, toolCalls)
 			if at := maybeExtractAttachment(params, toolCalls); at != nil {
@@ -298,6 +298,7 @@ func (s *acpSession) resetStatus() {
 	s.turnStart = time.Time{}
 	s.toolCount = 0
 	s.currentTool = time.Time{}
+	s.agentStatus.CurrentToolCommand = ""
 }
 
 func (s *acpSession) startTurnStatus() {
@@ -307,18 +308,21 @@ func (s *acpSession) startTurnStatus() {
 	s.turnStart = time.Now()
 	s.toolCount = 0
 	s.currentTool = time.Time{}
+	s.agentStatus.CurrentToolCommand = ""
 }
 
-func (s *acpSession) setToolStatus(active bool) {
+func (s *acpSession) setToolStatus(active bool, command string) {
 	s.statusMu.Lock()
 	old := s.agentStatus.State
 	if active {
 		s.agentStatus.State = "using_tools"
 		s.toolCount++
 		s.currentTool = time.Now()
+		s.agentStatus.CurrentToolCommand = command
 	} else {
 		s.agentStatus.State = "thinking"
 		s.currentTool = time.Time{}
+		s.agentStatus.CurrentToolCommand = ""
 	}
 	s.statusMu.Unlock()
 	state := s.agentStatus.State

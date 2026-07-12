@@ -49,6 +49,7 @@ type AgentStatus struct {
 	TurnDuration        time.Duration
 	ToolCount           int
 	CurrentToolDuration time.Duration
+	CurrentToolCommand  string
 	InputTokens         int
 	OutputTokens        int
 	Model               string
