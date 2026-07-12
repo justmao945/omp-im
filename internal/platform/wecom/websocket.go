@@ -164,7 +164,13 @@ func (c *wsClient) readLoop() {
 				return
 			default:
 			}
-			slog.Error("wecom: read websocket error", "error", err)
+			// "continuation after FIN" is a server-side framing issue; reconnecting
+			// is the only recovery. We log at WARN because it is usually transient.
+			lvl := slog.LevelWarn
+			if websocket.IsUnexpectedCloseError(err) {
+				lvl = slog.LevelDebug
+			}
+			slog.Log(nil, lvl, "wecom: read websocket error, reconnecting", "error", err)
 			return
 		}
 
