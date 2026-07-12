@@ -80,10 +80,15 @@ func TestPlatformPollsAndSendsText(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := p.Start(handler); err != nil {
-		t.Fatal(err)
-	}
+	go func() {
+		if err := p.Start(handler); err != nil {
+			t.Errorf("platform start: %v", err)
+		}
+	}()
 	defer p.Stop()
+
+	// Wait for poll loop to start.
+	time.Sleep(100 * time.Millisecond)
 
 	select {
 	case msg := <-received:

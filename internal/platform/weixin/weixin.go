@@ -308,17 +308,19 @@ func (p *Platform) pauseSession(d time.Duration) {
 	slog.Warn("weixin: session paused after gateway error", "duration", d)
 }
 
-// Start begins the long-poll loop.
+// Start begins the long-poll loop and blocks until Stop is called.
 func (p *Platform) Start(handler core.MessageHandler) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.stopping {
+		p.mu.Unlock()
 		return fmt.Errorf("weixin: platform stopped")
 	}
 	p.handler = handler
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
+	p.mu.Unlock()
 	go p.pollLoop(ctx)
+	<-ctx.Done()
 	return nil
 }
 
