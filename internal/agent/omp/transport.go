@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"sync"
 	"sync/atomic"
+	"syscall"
+	"time"
 )
 
 // transport implements a minimal JSON-RPC client over the stdio of an ACP agent.
@@ -65,6 +67,10 @@ func newTransport(cfg agentConfig, serverReqHandler func(method string, params j
 		return nil, fmt.Errorf("acp stdout pipe: %w", err)
 	}
 	cmd.Stderr = nil // let stderr go to parent for now
+
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid: true,
+	}
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("acp start %s: %w", cfg.Command, err)
@@ -193,9 +199,44 @@ func (t *transport) readLoop() {
 }
 
 func (t *transport) close() error {
-	t.closed.Store(true)
+	if !t.closed.CompareAndSwap(false, true) {
+		return nil
+	}
 	_ = t.stdin.Close()
-	return t.cmd.Wait()
+
+	// Close any pending call so callers are not blocked forever.
+	t.mu.Lock()
+	pendingCalls := make([]chan rpcResponse, 0, len(t.pending))
+	for _, ch := range t.pending {
+		pendingCalls = append(pendingCalls, ch)
+	}
+	t.pending = make(map[int]chan rpcResponse)
+	t.mu.Unlock()
+	for _, ch := range pendingCalls {
+		ch <- rpcResponse{Error: fmt.Errorf("acp transport closed")}
+	}
+
+	if t.cmd == nil || t.cmd.Process == nil {
+		return nil
+	}
+
+	// Graceful shutdown: close stdin, then terminate the whole process group.
+	pid := t.cmd.Process.Pid
+	_ = syscall.Kill(-pid, syscall.SIGTERM)
+
+	done := make(chan struct{})
+	go func() {
+		_ = t.cmd.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		_ = t.cmd.Wait()
+	}
+	return nil
 }
 
 func mustMarshal(v any) json.RawMessage {
