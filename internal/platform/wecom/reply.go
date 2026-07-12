@@ -253,7 +253,7 @@ func buildStreamContent(rc *replyContext, thinkingDisplay, toolDisplay string, f
 		case rc.toolName != "" && toolDisplay != "off":
 			elapsed := ""
 			if !rc.toolStart.IsZero() {
-				elapsed = fmt.Sprintf("[%s] ", formatDuration(time.Since(rc.toolStart)))
+				elapsed = fmt.Sprintf("[%s %s] ", spinner(), formatDuration(time.Since(rc.toolStart)))
 			}
 			line := fmt.Sprintf("%s🔧 %s", elapsed, rc.toolName)
 			if rc.toolHistory != nil {
@@ -274,13 +274,13 @@ func buildStreamContent(rc *replyContext, thinkingDisplay, toolDisplay string, f
 			} else {
 				elapsed := ""
 				if !rc.turnStart.IsZero() {
-					elapsed = fmt.Sprintf("[%s] ", formatDuration(time.Since(rc.turnStart)))
+					elapsed = fmt.Sprintf("[%s %s] ", spinner(), formatDuration(time.Since(rc.turnStart)))
 				}
 				parts = append(parts, fmt.Sprintf("%s🤔 Thinking...", elapsed))
 			}
 		case !rc.turnStart.IsZero():
 			// No thinking or tool yet: show that the turn is in progress.
-			parts = append(parts, fmt.Sprintf("[%s] ⚙️ Working...", formatDuration(time.Since(rc.turnStart))))
+			parts = append(parts, fmt.Sprintf("[%s %s] ⚙️ Working...", spinner(), formatDuration(time.Since(rc.turnStart))))
 		}
 	} else {
 		// Body text has arrived; show it instead of the status line.
@@ -298,7 +298,7 @@ func buildStreamContent(rc *replyContext, thinkingDisplay, toolDisplay string, f
 }
 
 // buildStreamFooter builds the summary footer shown at the end of a turn.
-// It only shows the total elapsed time: ⏱️ Xs.
+// It shows total elapsed time and context usage: ⏱️ Xs · 🧠 X%.
 func buildStreamFooter(rc *replyContext, thinkingDisplay, toolDisplay string) string {
 	var total string
 	if !rc.turnEnd.IsZero() && rc.turnEnd.After(rc.turnStart) {
@@ -309,7 +309,14 @@ func buildStreamFooter(rc *replyContext, thinkingDisplay, toolDisplay string) st
 	if total == "" {
 		return ""
 	}
-	return fmt.Sprintf("⏱️ %s", total)
+
+	var items []string
+	items = append(items, fmt.Sprintf("⏱️ %s", total))
+	if rc.contextSize > 0 {
+		pct := rc.contextUsed * 100 / rc.contextSize
+		items = append(items, fmt.Sprintf("🧠 %d%%", pct))
+	}
+	return strings.Join(items, " · ")
 }
 
 // buildToolDetails renders a detailed log of every tool call for the footer.
@@ -338,6 +345,13 @@ func buildToolDetails(rc *replyContext) string {
 		parts = append(parts, line)
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// spinner returns a Braille spinner frame that changes every second.
+// It gives the status line a subtle animation while the turn is in progress.
+func spinner() string {
+	frames := []string{"⠋", "⠙", "⠹", "⠸"}
+	return frames[time.Now().Second()%4]
 }
 
 // formatToolInputOneLine parses a tool-call input JSON and returns a compact,

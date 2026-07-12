@@ -158,6 +158,7 @@ func TestBuildStreamContent(t *testing.T) {
 			wantContains: []string{
 				"result text",
 				"⏱️ 10s",
+				"🧠 26%",
 			},
 			wantNotContain: "thinking",
 		},
