@@ -17,8 +17,9 @@ type Config struct {
 	Projects     []ProjectConfig `json:"projects"`
 	Defaults     DefaultsConfig  `json:"default"`
 	Platforms    []PlatformConfig `json:"platforms"`
-	// SessionStore is the path to a JSON file that persists agent session IDs
-	// across restarts. If empty, it defaults to <user home>/.omp-im/sessions.json.
+	// SessionStore is the path to a file that persists agent session IDs
+	// across restarts. If empty, it defaults to <user home>/.omp-im/sessions.db
+	// (bbolt). A path ending in .json uses a plain JSON file instead.
 	SessionStore string `json:"session_store,omitempty"`
 }
 
@@ -145,9 +146,9 @@ func (c *Config) SessionStorePath() string {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(".", ".omp-im", "sessions.json")
+		return filepath.Join(".", ".omp-im", "sessions.db")
 	}
-	return filepath.Join(home, ".omp-im", "sessions.json")
+	return filepath.Join(home, ".omp-im", "sessions.db")
 }
 func (c *Config) Project(name string) (ProjectConfig, bool) {
 	for _, p := range c.Projects {

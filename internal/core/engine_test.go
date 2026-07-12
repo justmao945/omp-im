@@ -555,6 +555,30 @@ func TestEngineSessionStore(t *testing.T) {
 	}
 }
 
+func TestEngineSessionStoreEmptyFile(t *testing.T) {
+	eng, _ := newTestEngine("fake")
+	dir := t.TempDir()
+	storePath := filepath.Join(dir, "sessions.json")
+	if err := os.WriteFile(storePath, []byte{}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.SetSessionStore(storePath); err != nil {
+		t.Fatalf("SetSessionStore with empty file: %v", err)
+	}
+}
+
+func TestEngineSessionStoreWhitespaceFile(t *testing.T) {
+	eng, _ := newTestEngine("fake")
+	dir := t.TempDir()
+	storePath := filepath.Join(dir, "sessions.json")
+	if err := os.WriteFile(storePath, []byte("   \n\t\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.SetSessionStore(storePath); err != nil {
+		t.Fatalf("SetSessionStore with whitespace file: %v", err)
+	}
+}
+
 func TestEnginePCommand(t *testing.T) {
 	eng, _ := newTestEngine("fake")
 	p := &fakePlatform{name: "fake"}

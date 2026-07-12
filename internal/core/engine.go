@@ -2,12 +2,9 @@ package core
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,7 +26,7 @@ type Engine struct {
 	sessions   map[string]*sessionEntry
 	sessionsMu sync.Mutex
 
-	sessionStore     map[string]string
+	sessionStore     sessionStore
 	sessionStorePath string
 	sessionStoreMu   sync.Mutex
 
@@ -70,7 +67,6 @@ func NewEngine(agents map[string]Agent, defaultAgent string, projects map[string
 		ctx:             ctx,
 		cancel:          cancel,
 		sessions:        make(map[string]*sessionEntry),
-		sessionStore:    make(map[string]string),
 		activeTurns:     make(map[string]context.CancelFunc),
 	}
 }
@@ -79,55 +75,36 @@ func NewEngine(agents map[string]Agent, defaultAgent string, projects map[string
 // restarts and loads any previously saved IDs from that file.
 func (e *Engine) SetSessionStore(path string) error {
 	e.sessionStoreMu.Lock()
-	e.sessionStorePath = path
-	e.sessionStoreMu.Unlock()
-	return e.loadSessionStore()
-}
-
-func (e *Engine) loadSessionStore() error {
-	e.sessionStoreMu.Lock()
 	defer e.sessionStoreMu.Unlock()
-	if e.sessionStorePath == "" {
-		return nil
+	if e.sessionStore != nil {
+		_ = e.sessionStore.Close()
 	}
-	data, err := os.ReadFile(e.sessionStorePath)
+	e.sessionStorePath = path
+	store, err := newSessionStore(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("read session store: %w", err)
-	}
-	var store map[string]string
-	if err := json.Unmarshal(data, &store); err != nil {
-		return fmt.Errorf("parse session store: %w", err)
+		return err
 	}
 	e.sessionStore = store
 	return nil
 }
 
-func (e *Engine) saveSessionStore() error {
-	e.sessionStoreMu.Lock()
-	defer e.sessionStoreMu.Unlock()
-	if e.sessionStorePath == "" {
-		return nil
-	}
-	if err := os.MkdirAll(filepath.Dir(e.sessionStorePath), 0o755); err != nil {
-		return fmt.Errorf("create session store dir: %w", err)
-	}
-	data, err := json.MarshalIndent(e.sessionStore, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal session store: %w", err)
-	}
-	if err := os.WriteFile(e.sessionStorePath, data, 0o600); err != nil {
-		return fmt.Errorf("write session store: %w", err)
-	}
+func (e *Engine) loadSessionStore() error {
+	// Deprecated: no-op because each operation now reads/writes the store directly.
 	return nil
 }
 
-func (e *Engine) getSessionID(sessionKey string) string {
+func (e *Engine) saveSessionStore() error {
+	// Deprecated: no-op because each operation now writes the store directly.
+	return nil
+}
+
+func (e *Engine) getSessionID(sessionKey string) (string, error) {
 	e.sessionStoreMu.Lock()
 	defer e.sessionStoreMu.Unlock()
-	return e.sessionStore[sessionKey]
+	if e.sessionStore == nil {
+		return "", nil
+	}
+	return e.sessionStore.Get(sessionKey)
 }
 
 func (e *Engine) setSessionID(sessionKey, sessionID string) {
@@ -135,19 +112,23 @@ func (e *Engine) setSessionID(sessionKey, sessionID string) {
 		return
 	}
 	e.sessionStoreMu.Lock()
-	e.sessionStore[sessionKey] = sessionID
-	e.sessionStoreMu.Unlock()
-	if err := e.saveSessionStore(); err != nil {
+	defer e.sessionStoreMu.Unlock()
+	if e.sessionStore == nil {
+		return
+	}
+	if err := e.sessionStore.Set(sessionKey, sessionID); err != nil {
 		slog.Error("failed to save session store", "error", err)
 	}
 }
 
 func (e *Engine) deleteSessionID(sessionKey string) {
 	e.sessionStoreMu.Lock()
-	delete(e.sessionStore, sessionKey)
-	e.sessionStoreMu.Unlock()
-	if err := e.saveSessionStore(); err != nil {
-		slog.Error("failed to save session store", "error", err)
+	defer e.sessionStoreMu.Unlock()
+	if e.sessionStore == nil {
+		return
+	}
+	if err := e.sessionStore.Delete(sessionKey); err != nil {
+		slog.Error("failed to delete session from store", "error", err)
 	}
 }
 
@@ -193,9 +174,12 @@ func (e *Engine) Stop() error {
 	e.sessions = make(map[string]*sessionEntry)
 	e.sessionsMu.Unlock()
 
-	if err := e.saveSessionStore(); err != nil {
-		slog.Error("failed to save session store on stop", "error", err)
+	e.sessionStoreMu.Lock()
+	if e.sessionStore != nil {
+		_ = e.sessionStore.Close()
+		e.sessionStore = nil
 	}
+	e.sessionStoreMu.Unlock()
 
 	for _, a := range e.agents {
 		if err := a.Stop(); err != nil {
@@ -373,7 +357,11 @@ func (e *Engine) ensureSessionForEntry(ctx context.Context, ent *sessionEntry, s
 		return fmt.Errorf("unknown project %q", projectName)
 	}
 
-	s, err := agent.StartSession(ctx, sessionKey, project, e.getSessionID(sessionKey))
+	prevSessionID, err := e.getSessionID(sessionKey)
+	if err != nil {
+		return fmt.Errorf("load session id: %w", err)
+	}
+	s, err := agent.StartSession(ctx, sessionKey, project, prevSessionID)
 	if err != nil {
 		e.sessionsMu.Lock()
 		ent.status = "error"
