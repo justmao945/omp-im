@@ -459,7 +459,7 @@ func (e *Engine) handleCommand(ctx context.Context, p Platform, msg *Message, cm
 	case "new":
 		e.handleNewCommand(ctx, p, msg)
 	default:
-		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Unknown command: /%s", cmd.name))
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Unknown command: `/%s`", cmd.name))
 	}
 }
 
@@ -472,15 +472,15 @@ func (e *Engine) handleAgentCommand(ctx context.Context, p Platform, msg *Messag
 			names = append(names, name)
 		}
 		sort.Strings(names)
-		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Current agent: %s\nAvailable: %s", current, strings.Join(names, ", ")))
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("## Agent\n\n**Current:** %s\n**Available:** %s", current, strings.Join(names, ", ")))
 		return
 	}
 	if _, ok := e.agents[arg]; !ok {
-		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Unknown agent: %s", arg))
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Unknown agent: `%s`", arg))
 		return
 	}
 	e.setSessionAgent(sessionKey, arg)
-	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Switched agent to %s. Takes effect on the next message.", arg))
+	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Switched agent to **%s**. Takes effect on the next message.", arg))
 }
 
 func (e *Engine) handleProjCommand(ctx context.Context, p Platform, msg *Message, arg string) {
@@ -492,27 +492,27 @@ func (e *Engine) handleProjCommand(ctx context.Context, p Platform, msg *Message
 			names = append(names, name)
 		}
 		sort.Strings(names)
-		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Current project: %s\nAvailable: %s", current, strings.Join(names, ", ")))
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("## Project\n\n**Current:** %s\n**Available:** %s", current, strings.Join(names, ", ")))
 		return
 	}
 	if _, ok := e.projects[arg]; !ok {
-		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Unknown project: %s", arg))
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Unknown project: `%s`", arg))
 		return
 	}
 	e.setSessionProject(sessionKey, arg)
-	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Switched project to %s. Takes effect on the next message.", arg))
+	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Switched project to **%s**. Takes effect on the next message.", arg))
 }
 
 func (e *Engine) handleHelpCommand(ctx context.Context, p Platform, msg *Message) {
-	_ = p.Reply(ctx, msg.ReplyCtx, `Available commands:
-/agent — show the current agent and available agents
-/agent <name> — switch to the named agent
-/proj — show the current project and available projects
-/proj <name> — switch to the named project
-/esc — cancel the currently generating reply
-/p — show current agent, project, session status, and tool/model info
-/new — start a new session (closes the current one, next message starts fresh)
-/help, /? — show this help`)
+	_ = p.Reply(ctx, msg.ReplyCtx, "## Available Commands\n\n"+
+		"- `/agent` — show the current agent and available agents\n"+
+		"- `/agent <name>` — switch to the named agent\n"+
+		"- `/proj` — show the current project and available projects\n"+
+		"- `/proj <name>` — switch to the named project\n"+
+		"- `/esc` — cancel the currently generating reply\n"+
+		"- `/p` — show current agent, project, session status, and tool/model info\n"+
+		"- `/new` — start a new session (closes the current one, next message starts fresh)\n"+
+		"- `/help`, `/?` — show this help")
 }
 
 func (e *Engine) handleEscCommand(ctx context.Context, p Platform, msg *Message) {
@@ -533,15 +533,16 @@ func (e *Engine) handlePCommand(ctx context.Context, p Platform, msg *Message) {
 	projectName := e.sessionProject(sessionKey)
 
 	var lines []string
-	lines = append(lines, fmt.Sprintf("Agent: %s", agentName))
-	lines = append(lines, fmt.Sprintf("Project: %s", projectName))
+	lines = append(lines, "## Status")
+	lines = append(lines, "")
+	lines = append(lines, fmt.Sprintf("- **Agent:** %s", agentName))
+	lines = append(lines, fmt.Sprintf("- **Project:** %s", projectName))
 
 	e.sessionsMu.Lock()
 	ent, ok := e.sessions[sessionKey]
 	e.sessionsMu.Unlock()
 
 	if !ok || ent == nil || ent.session == nil {
-		lines = append(lines, "Status: idle")
 		_ = p.Reply(ctx, msg.ReplyCtx, strings.Join(lines, "\n"))
 		return
 	}
@@ -550,35 +551,34 @@ func (e *Engine) handlePCommand(ctx context.Context, p Platform, msg *Message) {
 
 	// Model configuration.
 	if st.Model != "" {
-		lines = append(lines, fmt.Sprintf("Model: %s", st.Model))
+		lines = append(lines, fmt.Sprintf("- **Model:** %s", st.Model))
 	}
 	if st.ReasoningEffort != "" {
-		lines = append(lines, fmt.Sprintf("Reasoning effort: %s", st.ReasoningEffort))
+		lines = append(lines, fmt.Sprintf("- **Reasoning effort:** %s", st.ReasoningEffort))
 	}
 
 	// Session state.
-	lines = append(lines, fmt.Sprintf("Status: %s", st.State))
 	if st.TurnDuration > 0 {
-		lines = append(lines, fmt.Sprintf("Elapsed: %s", formatDuration(st.TurnDuration)))
+		lines = append(lines, fmt.Sprintf("- **Elapsed:** %s", formatDuration(st.TurnDuration)))
 	}
 	if st.ContextSize > 0 {
-		lines = append(lines, fmt.Sprintf("Context: %s", formatContext(st.ContextUsed, st.ContextSize)))
+		lines = append(lines, fmt.Sprintf("- **Context:** %s", formatContext(st.ContextUsed, st.ContextSize)))
 	}
 
 	// Active tool.
 	if st.ToolCount > 0 {
-		lines = append(lines, fmt.Sprintf("Tools used: %d", st.ToolCount))
+		lines = append(lines, fmt.Sprintf("- **Tools used:** %d", st.ToolCount))
 		if st.CurrentToolDuration > 0 {
-			lines = append(lines, fmt.Sprintf("Current tool: %s", formatDuration(st.CurrentToolDuration)))
+			lines = append(lines, fmt.Sprintf("- **Current tool:** %s", formatDuration(st.CurrentToolDuration)))
 		}
 	}
 	if st.CurrentToolCommand != "" {
-		lines = append(lines, fmt.Sprintf("Command: %s", truncate(st.CurrentToolCommand, 120)))
+		lines = append(lines, fmt.Sprintf("- **Command:** `%s`", truncate(st.CurrentToolCommand, 120)))
 	}
 
 	// Token usage for this turn.
 	if st.InputTokens > 0 || st.OutputTokens > 0 {
-		lines = append(lines, fmt.Sprintf("Tokens: %d / %d", st.InputTokens, st.OutputTokens))
+		lines = append(lines, fmt.Sprintf("- **Tokens:** %d / %d", st.InputTokens, st.OutputTokens))
 	}
 
 	_ = p.Reply(ctx, msg.ReplyCtx, strings.Join(lines, "\n"))

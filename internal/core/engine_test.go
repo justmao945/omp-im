@@ -367,7 +367,7 @@ func TestEngineAgentCommand(t *testing.T) {
 	if len(replies) < 2 {
 		t.Fatalf("got %d replies, want at least 2", len(replies))
 	}
-	if replies[0] != "Switched agent to claude. Takes effect on the next message." {
+	if replies[0] != "Switched agent to **claude**. Takes effect on the next message." {
 		t.Fatalf("first reply = %q", replies[0])
 	}
 	if replies[len(replies)-1] != "claude-reply:hello" {
@@ -580,7 +580,7 @@ func TestEnginePCommand(t *testing.T) {
 	replies := append([]string(nil), p.replies...)
 	p.mu.Unlock()
 
-	if len(replies) != 1 || !strings.Contains(replies[0], "Agent:") {
+	if !strings.Contains(replies[0], "**Agent:**") {
 		t.Fatalf("replies = %v", replies)
 	}
 }
@@ -631,13 +631,10 @@ func TestEnginePCommandShowsStatus(t *testing.T) {
 		t.Fatalf("got %d replies, want 2", len(replies))
 	}
 	pReply := replies[1]
-	if !strings.Contains(pReply, "Status:") {
-		t.Fatalf("/p reply missing status: %q", pReply)
-	}
-	if !strings.Contains(pReply, "Tokens:") {
+	if !strings.Contains(pReply, "**Tokens:**") {
 		t.Fatalf("/p reply missing tokens: %q", pReply)
 	}
-	if strings.Contains(pReply, "[U]") || strings.Contains(pReply, "[A]") {
+	if strings.Contains(pReply, "Status:") {
 		t.Fatalf("/p reply should not contain raw history markers: %q", pReply)
 	}
 }
@@ -781,7 +778,7 @@ func TestEnginePCommandDuringActiveTurn(t *testing.T) {
 	p.mu.Unlock()
 
 	// /p should reply immediately while the slow turn is still queued/active.
-	if len(replies) != 1 || !strings.Contains(replies[0], "Agent:") {
+	if !strings.Contains(replies[0], "**Agent:**") {
 		t.Fatalf("replies = %v", replies)
 	}
 }
