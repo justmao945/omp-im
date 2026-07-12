@@ -20,14 +20,18 @@ Example:
 ```
 Agent: omp
 Project: default
-Model: gpt-4o
-Status: using_tools
+Model: kimi-code/kimi-for-coding
+Reasoning effort: auto
+Status: idle
 Elapsed: 45s
+Context: 8% / 262K
 Tools used: 2
 Current tool: 12s
 Command: mkdir -p caopan && ...
 Tokens: 1234 / 567
 ```
 
+- `Model` and `Reasoning effort` show the active model configuration from the agent.
+- `Context` shows used context as a percentage and the total context window.
 - `Tokens` shows input / output token counts for the current turn.
 - `Command` is displayed only while an `execute` tool is running.

@@ -846,3 +846,22 @@ func TestEngineMessageOrderingPerSession(t *testing.T) {
 	}
 }
 
+func TestFormatContext(t *testing.T) {
+	cases := []struct {
+		used, size int
+		want       string
+	}{
+		{20332, 262144, "8% / 262K"},
+		{53000, 200000, "26% / 200K"},
+		{1500000, 2000000, "75% / 2.0M"},
+		{500, 900, "56% / 900"},
+	}
+	for _, c := range cases {
+		got := formatContext(c.used, c.size)
+		if got != c.want {
+			t.Errorf("formatContext(%d, %d) = %q, want %q", c.used, c.size, got, c.want)
+		}
+	}
+}
+
+

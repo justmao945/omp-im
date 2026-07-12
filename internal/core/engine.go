@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -530,13 +531,25 @@ func (e *Engine) handlePCommand(ctx context.Context, p Platform, msg *Message) {
 	}
 
 	st := ent.session.Status()
+
+	// Model configuration.
 	if st.Model != "" {
 		lines = append(lines, fmt.Sprintf("Model: %s", st.Model))
 	}
+	if st.ReasoningEffort != "" {
+		lines = append(lines, fmt.Sprintf("Reasoning effort: %s", st.ReasoningEffort))
+	}
+
+	// Session state.
 	lines = append(lines, fmt.Sprintf("Status: %s", st.State))
 	if st.TurnDuration > 0 {
 		lines = append(lines, fmt.Sprintf("Elapsed: %s", formatDuration(st.TurnDuration)))
 	}
+	if st.ContextSize > 0 {
+		lines = append(lines, fmt.Sprintf("Context: %s", formatContext(st.ContextUsed, st.ContextSize)))
+	}
+
+	// Active tool.
 	if st.ToolCount > 0 {
 		lines = append(lines, fmt.Sprintf("Tools used: %d", st.ToolCount))
 		if st.CurrentToolDuration > 0 {
@@ -546,15 +559,10 @@ func (e *Engine) handlePCommand(ctx context.Context, p Platform, msg *Message) {
 	if st.CurrentToolCommand != "" {
 		lines = append(lines, fmt.Sprintf("Command: %s", truncate(st.CurrentToolCommand, 120)))
 	}
+
+	// Token usage for this turn.
 	if st.InputTokens > 0 || st.OutputTokens > 0 {
 		lines = append(lines, fmt.Sprintf("Tokens: %d / %d", st.InputTokens, st.OutputTokens))
-	}
-	if st.ReasoningEffort != "" {
-		lines = append(lines, fmt.Sprintf("Reasoning effort: %s", st.ReasoningEffort))
-	}
-	if st.ContextSize > 0 {
-		pct := float64(st.ContextUsed) / float64(st.ContextSize) * 100
-		lines = append(lines, fmt.Sprintf("Context: %d / %d (%.0f%%)", st.ContextUsed, st.ContextSize, pct))
 	}
 
 	_ = p.Reply(ctx, msg.ReplyCtx, strings.Join(lines, "\n"))
@@ -588,6 +596,25 @@ func formatDuration(d time.Duration) string {
 		return d.Round(time.Second).String()
 	}
 	return d.Round(time.Second).String()
+}
+
+func formatContext(used, size int) string {
+	if size <= 0 {
+		return ""
+	}
+	pct := float64(used) / float64(size) * 100
+	return fmt.Sprintf("%.0f%% / %s", pct, formatSize(size))
+}
+
+func formatSize(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.0fK", float64(n)/1_000)
+	default:
+		return strconv.Itoa(n)
+	}
 }
 
 func truncate(s string, max int) string {
