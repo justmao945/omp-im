@@ -390,10 +390,11 @@ func (p *Platform) pollLoop(ctx context.Context) {
 
 		for i := range resp.Msgs {
 			m := &resp.Msgs[i]
-			// /esc is an interrupt command and should be able to cancel a turn
-			// that is already running. Dispatch it concurrently; normal messages
-			// are still handled sequentially to preserve reply order.
-			if strings.TrimSpace(bodyFromItemList(m.ItemList)) == "/esc" {
+			// /esc and /p are status/control commands and should be able to run
+			// while a turn is in progress. Dispatch them concurrently; normal
+			// messages are still handled sequentially to preserve reply order.
+			body := strings.TrimSpace(bodyFromItemList(m.ItemList))
+			if body == "/esc" || body == "/p" {
 				go p.dispatchInbound(ctx, m, h)
 			} else {
 				p.dispatchInbound(ctx, m, h)

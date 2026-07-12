@@ -105,6 +105,7 @@ Send these commands in any Weixin conversation:
 - `/proj <name>` — switch the current conversation to a different project (changes the agent's working directory).
 - `/list` — list active sessions of the current agent, read from the agent itself, with project and status.
 - `/esc` — interrupt the currently running agent reply.
+- `/p` — show current agent, project, and turn status (thinking/tool usage/tokens).
 - `/help`, `/?` — show this help.
 
 ## Agent backend

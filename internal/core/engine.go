@@ -285,6 +285,8 @@ func (e *Engine) handleCommand(ctx context.Context, p Platform, msg *Message, cm
 		e.handleHelpCommand(ctx, p, msg)
 	case "esc":
 		e.handleEscCommand(ctx, p, msg)
+	case "p":
+		e.handlePCommand(ctx, p, msg)
 	default:
 		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("未知命令: /%s", cmd.name))
 	}
@@ -369,6 +371,7 @@ func (e *Engine) handleHelpCommand(ctx context.Context, p Platform, msg *Message
 /proj <name> — 切换到指定 project
 /list — 列出当前 agent 的 active sessions
 /esc — 中断当前正在生成的回复
+/p — 查看当前 agent、project 和会话状态
 /help, /? — 显示本帮助`)
 }
 
@@ -382,6 +385,56 @@ func (e *Engine) handleEscCommand(ctx context.Context, p Platform, msg *Message)
 		return
 	}
 	_ = p.Reply(ctx, msg.ReplyCtx, "当前没有正在生成的回复")
+}
+
+func (e *Engine) handlePCommand(ctx context.Context, p Platform, msg *Message) {
+	sessionKey := msg.SessionKey
+	agentName := e.sessionAgent(sessionKey)
+	projectName := e.sessionProject(sessionKey)
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("Agent: %s", agentName))
+	lines = append(lines, fmt.Sprintf("Project: %s", projectName))
+
+	e.sessionsMu.Lock()
+	ent, ok := e.sessions[sessionKey]
+	e.sessionsMu.Unlock()
+
+	if !ok || ent == nil || ent.session == nil {
+		lines = append(lines, "状态: idle")
+		_ = p.Reply(ctx, msg.ReplyCtx, strings.Join(lines, "\n"))
+		return
+	}
+
+	st := ent.session.Status()
+	lines = append(lines, fmt.Sprintf("状态: %s", st.State))
+	if st.TurnDuration > 0 {
+		lines = append(lines, fmt.Sprintf("已进行: %s", formatDuration(st.TurnDuration)))
+	}
+	if st.ToolCount > 0 {
+		lines = append(lines, fmt.Sprintf("已调用工具: %d", st.ToolCount))
+		if st.CurrentToolDuration > 0 {
+			lines = append(lines, fmt.Sprintf("当前工具已用时: %s", formatDuration(st.CurrentToolDuration)))
+		}
+	}
+	if st.InputTokens > 0 || st.OutputTokens > 0 {
+		lines = append(lines, fmt.Sprintf("Tokens: %d / %d", st.InputTokens, st.OutputTokens))
+	}
+	if st.Model != "" {
+		lines = append(lines, fmt.Sprintf("模型: %s", st.Model))
+	}
+	if st.ReasoningEffort != "" {
+		lines = append(lines, fmt.Sprintf("思考强度: %s", st.ReasoningEffort))
+	}
+
+	_ = p.Reply(ctx, msg.ReplyCtx, strings.Join(lines, "\n"))
+}
+
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return d.Round(time.Second).String()
+	}
+	return d.Round(time.Second).String()
 }
 
 func (e *Engine) sessionAgent(sessionKey string) string {

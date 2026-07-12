@@ -59,6 +59,10 @@ func (s *fakeSession) Respond(ctx context.Context, prompt string, images []Image
 	}
 	return s.reply + ":" + prompt, s.attachments, nil
 }
+
+func (s *fakeSession) Status() AgentStatus {
+	return AgentStatus{State: "idle"}
+}
 func (s *fakeSession) Close() error {
 	s.closed = true
 	return nil
@@ -462,6 +466,43 @@ func TestEngineEscCommand(t *testing.T) {
 	p.mu.Unlock()
 
 	if len(replies) != 1 || !strings.Contains(replies[0], "已中断") {
+		t.Fatalf("replies = %v", replies)
+	}
+}
+
+func TestEnginePCommand(t *testing.T) {
+	eng, _ := newTestEngine("fake")
+	p := &fakePlatform{name: "fake"}
+	eng.AddPlatform(p)
+
+	go func() {
+		for p.getHandler() == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+		p.getHandler()(p, &Message{
+			SessionKey: "fake:u1",
+			Platform:   "fake",
+			UserID:     "u1",
+			Content:    "/p",
+			ReplyCtx:   "ctx",
+		})
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		_ = eng.Run()
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	_ = eng.Stop()
+	<-done
+
+	p.mu.Lock()
+	replies := append([]string(nil), p.replies...)
+	p.mu.Unlock()
+
+	if len(replies) != 1 || !strings.Contains(replies[0], "Agent:") {
 		t.Fatalf("replies = %v", replies)
 	}
 }

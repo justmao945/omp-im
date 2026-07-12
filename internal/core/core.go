@@ -37,11 +37,26 @@ type Agent interface {
 	Stop() error
 }
 
+// AgentStatus describes the current state of an agent turn.
+type AgentStatus struct {
+	State               string
+	TurnDuration        time.Duration
+	ToolCount           int
+	CurrentToolDuration time.Duration
+	InputTokens         int
+	OutputTokens        int
+	Model               string
+	ReasoningEffort     string
+}
+
 // AgentSession is a single running conversation with an agent.
 type AgentSession interface {
 	// Respond sends the current conversation turn to the agent and returns
 	// the assistant's text reply along with any files/images the agent produced.
 	Respond(ctx context.Context, prompt string, images []ImageAttachment) (string, []OutboundAttachment, error)
+	// Status returns the current state of the session (idle, thinking, using_tools, etc.)
+	// along with turn timing and usage information.
+	Status() AgentStatus
 	Close() error
 }
 

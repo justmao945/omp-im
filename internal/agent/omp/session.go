@@ -24,6 +24,11 @@ type acpSession struct {
 
 	mu            sync.Mutex
 	turnMu        sync.Mutex
+	statusMu      sync.Mutex
+	agentStatus   core.AgentStatus
+	turnStart     time.Time
+	toolCount     int
+	currentTool   time.Time
 	sessionID     string
 	history       []historyEntry
 	currentStatus string
@@ -131,6 +136,8 @@ func (s *acpSession) Respond(ctx context.Context, prompt string, images []core.I
 
 	s.setStatus("busy")
 	defer s.setStatus("idle")
+	s.startTurnStatus()
+	defer s.resetStatus()
 
 	blocks := []any{map[string]any{"type": "text", "text": prompt}}
 	for _, img := range images {
@@ -162,6 +169,12 @@ func (s *acpSession) Respond(ctx context.Context, prompt string, images []core.I
 				mu.Lock()
 				textParts = append(textParts, text)
 				mu.Unlock()
+			}
+			if hasToolCall(params) {
+				s.setToolStatus(true)
+			}
+			if isToolCallCompleted(params) {
+				s.setToolStatus(false)
 			}
 			collectToolCall(params, toolCalls)
 			if at := maybeExtractAttachment(params, toolCalls); at != nil {
@@ -201,6 +214,7 @@ func (s *acpSession) Respond(ctx context.Context, prompt string, images []core.I
 	if pr.StopReason == "error" {
 		return "", nil, fmt.Errorf("acp session/prompt failed")
 	}
+	s.setUsage(pr)
 
 	mu.Lock()
 	reply := strings.TrimSpace(strings.Join(textParts, ""))
@@ -241,6 +255,58 @@ func (s *acpSession) lastActivity() time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.lastActivityAt
+}
+
+func (s *acpSession) Status() core.AgentStatus {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+	st := s.agentStatus
+	if st.State == "idle" {
+		return st
+	}
+	st.TurnDuration = time.Since(s.turnStart)
+	if !s.currentTool.IsZero() {
+		st.CurrentToolDuration = time.Since(s.currentTool)
+	}
+	return st
+}
+
+func (s *acpSession) resetStatus() {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+	s.agentStatus = core.AgentStatus{State: "idle"}
+	s.turnStart = time.Time{}
+	s.toolCount = 0
+	s.currentTool = time.Time{}
+}
+
+func (s *acpSession) startTurnStatus() {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+	s.agentStatus = core.AgentStatus{State: "thinking"}
+	s.turnStart = time.Now()
+	s.toolCount = 0
+	s.currentTool = time.Time{}
+}
+
+func (s *acpSession) setToolStatus(active bool) {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+	if active {
+		s.agentStatus.State = "using_tools"
+		s.toolCount++
+		s.currentTool = time.Now()
+	} else {
+		s.agentStatus.State = "thinking"
+		s.currentTool = time.Time{}
+	}
+}
+
+func (s *acpSession) setUsage(pr promptResult) {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+	s.agentStatus.InputTokens = pr.Usage.InputTokens
+	s.agentStatus.OutputTokens = pr.Usage.OutputTokens
 }
 
 func (s *acpSession) Close() error {
@@ -337,6 +403,41 @@ func collectToolCall(params json.RawMessage, calls map[string]*toolCall) {
 			call.Path = head.Locations[0].Path
 		}
 	}
+}
+
+func hasToolCall(params json.RawMessage) bool {
+	var wrap struct {
+		Update json.RawMessage `json:"update"`
+	}
+	if err := json.Unmarshal(params, &wrap); err != nil {
+		return false
+	}
+	var head struct {
+		SessionUpdate string `json:"sessionUpdate"`
+		ToolCallID    string `json:"toolCallId"`
+	}
+	if err := json.Unmarshal(wrap.Update, &head); err != nil {
+		return false
+	}
+	return head.SessionUpdate == "tool_call" && head.ToolCallID != ""
+}
+
+func isToolCallCompleted(params json.RawMessage) bool {
+	var wrap struct {
+		Update json.RawMessage `json:"update"`
+	}
+	if err := json.Unmarshal(params, &wrap); err != nil {
+		return false
+	}
+	var head struct {
+		SessionUpdate string `json:"sessionUpdate"`
+		ToolCallID    string `json:"toolCallId"`
+		Status        string `json:"status"`
+	}
+	if err := json.Unmarshal(wrap.Update, &head); err != nil {
+		return false
+	}
+	return head.SessionUpdate == "tool_call_update" && head.ToolCallID != "" && head.Status == "completed"
 }
 
 func extractPathFromRawInput(raw json.RawMessage) string {
