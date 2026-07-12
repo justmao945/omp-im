@@ -3,9 +3,14 @@ package wecom
 import (
 	"fmt"
 	"log/slog"
+	"unicode/utf8"
 )
 
+// maxStreamContentBytes is the maximum content length for a single WeCom stream message.
+const maxStreamContentBytes = 20480
+
 // sendTextReply sends a passive text reply to the chat that triggered the inbound message.
+// Long text is split into multiple stream chunks with the same stream id.
 func (p *Platform) sendTextReply(rc *replyContext, text string) error {
 	if rc == nil || rc.chatid == "" {
 		return fmt.Errorf("wecom: chatid is empty")
@@ -14,15 +19,50 @@ func (p *Platform) sendTextReply(rc *replyContext, text string) error {
 		return nil
 	}
 
-	body := map[string]interface{}{
-		"msgtype": "stream",
-		"stream": map[string]interface{}{
-			"id":      generateReqID(),
-			"finish":  true,
-			"content": text,
-		},
+	chunks := splitTextChunks(text, maxStreamContentBytes)
+	streamID := generateReqID()
+	for i, chunk := range chunks {
+		body := map[string]interface{}{
+			"msgtype": "stream",
+			"stream": map[string]interface{}{
+				"id":      streamID,
+				"finish":  i == len(chunks)-1,
+				"content": chunk,
+			},
+		}
+		if err := p.respond(rc.reqID, body); err != nil {
+			return err
+		}
 	}
-	return p.respond(rc.reqID, body)
+	return nil
+}
+
+// splitTextChunks splits text into chunks so each chunk is at most maxBytes bytes
+// when encoded as UTF-8. It never splits a multi-byte rune.
+func splitTextChunks(text string, maxBytes int) []string {
+	if maxBytes <= 0 {
+		return []string{text}
+	}
+	var chunks []string
+	var current []rune
+	var currentBytes int
+	for _, r := range text {
+		rBytes := utf8.RuneLen(r)
+		if rBytes < 0 {
+			rBytes = 1
+		}
+		if currentBytes+rBytes > maxBytes && currentBytes > 0 {
+			chunks = append(chunks, string(current))
+			current = nil
+			currentBytes = 0
+		}
+		current = append(current, r)
+		currentBytes += rBytes
+	}
+	if len(current) > 0 {
+		chunks = append(chunks, string(current))
+	}
+	return chunks
 }
 
 // respond sends an aibot_respond_msg frame using the original inbound req_id.

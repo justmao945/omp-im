@@ -7,13 +7,14 @@ import (
 
 // inboundMessage represents a parsed message from the WeCom WebSocket gateway.
 type inboundMessage struct {
-	msgid    string
+	msgid    string // message unique id
 	chatid   string // group chat id or user id for direct messages
 	chattype string // "single" or "group"
 	from     string // sender userid
 	msgtype  string // "text", "image", "file", "voice", "mixed", "event", ...
 	text     string // concatenated text content
 	reqID    string // original frame req_id, used for passive replies
+	aibotid  string // robot id, used to strip @-mentions in groups
 
 	// images are decrypted image attachments from this message.
 	images []imageAttachment
@@ -35,6 +36,7 @@ type replyContext struct {
 	chatid   string
 	chattype string
 	reqID    string
+	aibotid  string // robot id, used to strip @-mentions in groups
 }
 
 // wsFrame is the top-level envelope received over the WebSocket.
@@ -63,6 +65,7 @@ func parseInboundMessage(frame *wsFrame) *inboundMessage {
 	chatid, _ := body["chatid"].(string)
 	chattype, _ := body["chattype"].(string)
 	msgtype, _ := body["msgtype"].(string)
+	aibotid, _ := body["aibotid"].(string)
 	reqID, _ := frame.Headers["req_id"]
 
 	fromUser := ""
@@ -84,12 +87,14 @@ func parseInboundMessage(frame *wsFrame) *inboundMessage {
 		from:     fromUser,
 		msgtype:  msgtype,
 		reqID:    reqID,
+		aibotid:  aibotid,
 	}
 
 	switch msgtype {
 	case "text":
 		if text, ok := body["text"].(map[string]interface{}); ok {
 			m.text, _ = text["content"].(string)
+			m.text = stripWeComAtMentions(m.text, aibotid)
 		}
 	case "image":
 		if img := parseImageContent(body["image"]); img != nil {
@@ -98,13 +103,15 @@ func parseInboundMessage(frame *wsFrame) *inboundMessage {
 		m.text = "[image]"
 	case "mixed":
 		m.text, m.images = parseMixedBody(body)
+		m.text = stripWeComAtMentions(m.text, aibotid)
 	case "voice":
 		if voice, ok := body["voice"].(map[string]interface{}); ok {
 			m.text, _ = voice["content"].(string)
+			m.text = stripWeComAtMentions(m.text, aibotid)
 		}
 	}
 
-	slog.Debug("wecom: parsed inbound message", "msgtype", msgtype, "text_len", len(m.text), "images", len(m.images), "from", fromUser)
+	slog.Debug("wecom: parsed inbound message", "msgtype", msgtype, "text_len", len(m.text), "images", len(m.images), "from", fromUser, "aibotid", aibotid)
 
 	return m
 }

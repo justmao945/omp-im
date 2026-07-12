@@ -135,7 +135,7 @@ func (p *Platform) handleFrame(frame *wsFrame) {
 		UserID:     msg.from,
 		Content:    msg.text,
 		Images:     images,
-		ReplyCtx:   &replyContext{chatid: msg.chatid, chattype: msg.chattype, reqID: msg.reqID},
+		ReplyCtx:   &replyContext{chatid: msg.chatid, chattype: msg.chattype, reqID: msg.reqID, aibotid: msg.aibotid},
 	}
 
 	if p.handler != nil {
