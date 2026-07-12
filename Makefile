@@ -1,4 +1,4 @@
-.PHONY: build test run clean install install-user
+.PHONY: build test run clean install install-user pm2-start pm2-stop
 
 build:
 	go build -o omp-im ./cmd/omp-im
@@ -11,6 +11,12 @@ run: build
 
 clean:
 	rm -f omp-im
+
+pm2-start: build
+	pm2 start ecosystem.config.js
+
+pm2-stop:
+	pm2 stop ecosystem.config.js
 
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin

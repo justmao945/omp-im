@@ -22,6 +22,23 @@ make install-user   # installs to ~/.local/bin
 omp-im
 ```
 
+### Run with PM2 (background)
+
+```bash
+make pm2-start
+pm2 save
+pm2 startup          # follow the printed command to enable auto-start on boot
+```
+
+Manage the process:
+
+```bash
+pm2 status
+pm2 logs omp-im
+pm2 restart omp-im
+make pm2-stop
+```
+
 All working data is stored under `~/.omp-im`.
 
 ## Quick links
