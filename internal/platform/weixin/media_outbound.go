@@ -157,6 +157,9 @@ func mediaFromUploadRef(ref *cdnUploadedRef) *cdnMedia {
 
 // SendImage implements core.ImageSender.
 func (p *Platform) SendImage(ctx context.Context, replyCtx any, img core.ImageAttachment) error {
+	p.sendMu.Lock()
+	defer p.sendMu.Unlock()
+
 	rc, err := p.resolveReplyContext(replyCtx)
 	if err != nil {
 		return err
@@ -193,6 +196,9 @@ func isVideoFile(file core.FileAttachment) bool {
 
 // SendFile implements core.FileSender.
 func (p *Platform) SendFile(ctx context.Context, replyCtx any, file core.FileAttachment) error {
+	p.sendMu.Lock()
+	defer p.sendMu.Unlock()
+
 	rc, err := p.resolveReplyContext(replyCtx)
 	if err != nil {
 		return err

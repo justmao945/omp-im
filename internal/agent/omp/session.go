@@ -23,6 +23,7 @@ type acpSession struct {
 	tr         *transport
 
 	mu            sync.Mutex
+	turnMu        sync.Mutex
 	sessionID     string
 	history       []historyEntry
 	currentStatus string
@@ -123,6 +124,11 @@ func (s *acpSession) Respond(ctx context.Context, prompt string, images []core.I
 	if s.sessionID == "" {
 		return "", nil, fmt.Errorf("acp: no session id")
 	}
+	// Serialize full turns per session so concurrent inbound messages from
+	// the same user are processed (and replied to) in order.
+	s.turnMu.Lock()
+	defer s.turnMu.Unlock()
+
 	s.setStatus("busy")
 	defer s.setStatus("idle")
 

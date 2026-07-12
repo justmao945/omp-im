@@ -24,7 +24,7 @@ const (
 
 	weixinSendMaxRetries = 3
 	weixinSendRetryDelay = 500 * time.Millisecond
-	weixinChunkSendDelay = 100 * time.Millisecond
+	weixinChunkSendDelay = 300 * time.Millisecond
 )
 
 type replyContext struct {
@@ -59,6 +59,8 @@ type Platform struct {
 
 	pauseMu    sync.Mutex
 	pauseUntil time.Time
+
+	sendMu sync.Mutex
 }
 
 func sanitizePathSegment(s string) string {
@@ -386,16 +388,12 @@ func (p *Platform) pollLoop(ctx context.Context) {
 			continue
 		}
 
-		var wg sync.WaitGroup
+		// Process messages sequentially so concurrent messages from the same
+		// user are handled (and replied to) in order. Throughput for a single
+		// account is not a concern.
 		for i := range resp.Msgs {
-			i := i
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				p.dispatchInbound(ctx, &resp.Msgs[i], h)
-			}()
+			p.dispatchInbound(ctx, &resp.Msgs[i], h)
 		}
-		wg.Wait()
 
 		if ctx.Err() == nil && resp.GetUpdatesBuf != "" {
 			p.persistSyncBuf(resp.GetUpdatesBuf)
@@ -501,6 +499,10 @@ func (p *Platform) Reply(ctx context.Context, replyCtx any, content string) erro
 	if strings.TrimSpace(content) == "" {
 		return nil
 	}
+
+	// Serialize outbound sends to preserve message order across the platform.
+	p.sendMu.Lock()
+	defer p.sendMu.Unlock()
 
 	chunks := splitUTF8(content, maxWeixinChunk)
 	total := len(chunks)
