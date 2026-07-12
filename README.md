@@ -106,6 +106,7 @@ Send these commands in any Weixin conversation:
 - `/list` — list active sessions of the current agent, read from the agent itself, with project and status.
 - `/esc` — interrupt the currently running agent reply.
 - `/p` — show current agent, project, and turn status (thinking/tool usage/tokens).
+- `/new` — start a fresh session; the current session is closed and the next message creates a new one.
 - `/help`, `/?` — show this help.
 
 ## Agent backend

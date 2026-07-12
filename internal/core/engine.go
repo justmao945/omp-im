@@ -287,6 +287,8 @@ func (e *Engine) handleCommand(ctx context.Context, p Platform, msg *Message, cm
 		e.handleEscCommand(ctx, p, msg)
 	case "p":
 		e.handlePCommand(ctx, p, msg)
+	case "new":
+		e.handleNewCommand(ctx, p, msg)
 	default:
 		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("未知命令: /%s", cmd.name))
 	}
@@ -372,6 +374,7 @@ func (e *Engine) handleHelpCommand(ctx context.Context, p Platform, msg *Message
 /list — 列出当前 agent 的 active sessions
 /esc — 中断当前正在生成的回复
 /p — 查看当前 agent、project 和会话状态
+/new — 新建会话（关闭当前 session，下条消息开启新对话）
 /help, /? — 显示本帮助`)
 }
 
@@ -428,6 +431,23 @@ func (e *Engine) handlePCommand(ctx context.Context, p Platform, msg *Message) {
 	}
 
 	_ = p.Reply(ctx, msg.ReplyCtx, strings.Join(lines, "\n"))
+}
+
+func (e *Engine) handleNewCommand(ctx context.Context, p Platform, msg *Message) {
+	sessionKey := msg.SessionKey
+
+	e.sessionsMu.Lock()
+	ent, ok := e.sessions[sessionKey]
+	delete(e.sessions, sessionKey)
+	e.sessionsMu.Unlock()
+
+	if ok && ent != nil && ent.session != nil {
+		if err := ent.session.Close(); err != nil {
+			slog.Warn("new command: close session error", "session", sessionKey, "error", err)
+		}
+	}
+
+	_ = p.Reply(ctx, msg.ReplyCtx, "已新建会话，下条消息开始新对话")
 }
 
 func formatDuration(d time.Duration) string {

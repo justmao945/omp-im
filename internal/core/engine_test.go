@@ -507,6 +507,56 @@ func TestEnginePCommand(t *testing.T) {
 	}
 }
 
+func TestEngineNewCommand(t *testing.T) {
+	eng, _ := newTestEngine("fake")
+	p := &fakePlatform{name: "fake"}
+	eng.AddPlatform(p)
+
+	go func() {
+		for p.getHandler() == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+		// First message creates a session.
+		p.getHandler()(p, &Message{
+			SessionKey: "fake:u1",
+			Platform:   "fake",
+			UserID:     "u1",
+			Content:    "hello",
+			ReplyCtx:   "ctx",
+		})
+		time.Sleep(20 * time.Millisecond)
+		// /new closes the session.
+		p.getHandler()(p, &Message{
+			SessionKey: "fake:u1",
+			Platform:   "fake",
+			UserID:     "u1",
+			Content:    "/new",
+			ReplyCtx:   "ctx",
+		})
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		_ = eng.Run()
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	_ = eng.Stop()
+	<-done
+
+	p.mu.Lock()
+	replies := append([]string(nil), p.replies...)
+	p.mu.Unlock()
+
+	if len(replies) != 2 {
+		t.Fatalf("got %d replies, want 2", len(replies))
+	}
+	if !strings.Contains(replies[1], "已新建会话") {
+		t.Fatalf("new reply = %q", replies[1])
+	}
+}
+
 func TestEngineProjCommand(t *testing.T) {
 	eng := NewEngine(
 		map[string]Agent{"fake": &fakeAgent{name: "fake", reply: "hi"}},
