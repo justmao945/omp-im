@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -500,6 +502,56 @@ func TestEngineEscCommand(t *testing.T) {
 
 	if len(replies) != 1 || !strings.Contains(replies[0], "已中断") {
 		t.Fatalf("replies = %v", replies)
+	}
+}
+
+func TestEngineSessionStore(t *testing.T) {
+	eng, agent := newTestEngine("fake")
+	p := &fakePlatform{name: "fake"}
+	eng.AddPlatform(p)
+
+	dir := t.TempDir()
+	storePath := filepath.Join(dir, "sessions.json")
+	if err := os.WriteFile(storePath, []byte(`{"fake:u1":"persisted-id-123"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.SetSessionStore(storePath); err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		for p.getHandler() == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+		p.getHandler()(p, &Message{
+			SessionKey: "fake:u1",
+			Platform:   "fake",
+			UserID:     "u1",
+			Content:    "hello",
+			ReplyCtx:   "ctx",
+		})
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		_ = eng.Run()
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	_ = eng.Stop()
+	<-done
+
+	if agent.Started() != 1 {
+		t.Fatalf("agent started %d times, want 1", agent.Started())
+	}
+
+	data, err := os.ReadFile(storePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "persisted-id-123") {
+		t.Fatalf("session store did not preserve persisted session ID: %s", data)
 	}
 }
 
