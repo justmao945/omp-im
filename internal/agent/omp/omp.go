@@ -40,14 +40,14 @@ func (a *Agent) Name() string { return "omp" }
 func (a *Agent) Stop() error { return nil }
 
 // StartSession creates a new ACP conversation session in the given project.
-func (a *Agent) StartSession(ctx context.Context, sessionKey string, project core.Project) (core.AgentSession, error) {
+func (a *Agent) StartSession(ctx context.Context, sessionKey string, project core.Project, resumeSessionID string) (core.AgentSession, error) {
 	cmd, args := resolveOMPCommand()
 	cfg := agentConfig{Command: cmd, Args: args, WorkDir: project.WorkDir, AutoApproveTools: true}
 	tr, err := newTransport(cfg, nil)
 	if err != nil {
 		return nil, err
 	}
-	s, err := newACPSession(ctx, cfg, sessionKey, tr)
+	s, err := newACPSession(ctx, cfg, sessionKey, resumeSessionID, tr)
 	if err != nil {
 		return nil, err
 	}

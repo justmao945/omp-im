@@ -128,6 +128,9 @@ func runServer(configPath string) error {
 	}
 
 	engine := core.NewEngine(agents, cfg.Defaults.Agent, projects, cfg.Defaults.Project)
+	if err := engine.SetSessionStore(cfg.SessionStorePath()); err != nil {
+		return fmt.Errorf("load session store: %w", err)
+	}
 
 	for i, pc := range cfg.Platforms {
 		switch pc.Type {

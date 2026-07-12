@@ -2,9 +2,12 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -24,6 +27,10 @@ type Engine struct {
 
 	sessions   map[string]*sessionEntry
 	sessionsMu sync.Mutex
+
+	sessionStore     map[string]string
+	sessionStorePath string
+	sessionStoreMu   sync.Mutex
 
 	activeTurns   map[string]context.CancelFunc
 	activeTurnsMu sync.Mutex
@@ -66,8 +73,85 @@ func NewEngine(agents map[string]Agent, defaultAgent string, projects map[string
 		ctx:             ctx,
 		cancel:          cancel,
 		sessions:        make(map[string]*sessionEntry),
+		sessionStore:    make(map[string]string),
 		activeTurns:     make(map[string]context.CancelFunc),
 		MaxHistoryTurns: 20,
+	}
+}
+
+// SetSessionStore configures the path used to persist session IDs across
+// restarts and loads any previously saved IDs from that file.
+func (e *Engine) SetSessionStore(path string) error {
+	e.sessionStoreMu.Lock()
+	e.sessionStorePath = path
+	e.sessionStoreMu.Unlock()
+	return e.loadSessionStore()
+}
+
+func (e *Engine) loadSessionStore() error {
+	e.sessionStoreMu.Lock()
+	defer e.sessionStoreMu.Unlock()
+	if e.sessionStorePath == "" {
+		return nil
+	}
+	data, err := os.ReadFile(e.sessionStorePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read session store: %w", err)
+	}
+	var store map[string]string
+	if err := json.Unmarshal(data, &store); err != nil {
+		return fmt.Errorf("parse session store: %w", err)
+	}
+	e.sessionStore = store
+	return nil
+}
+
+func (e *Engine) saveSessionStore() error {
+	e.sessionStoreMu.Lock()
+	defer e.sessionStoreMu.Unlock()
+	if e.sessionStorePath == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(e.sessionStorePath), 0o755); err != nil {
+		return fmt.Errorf("create session store dir: %w", err)
+	}
+	data, err := json.MarshalIndent(e.sessionStore, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal session store: %w", err)
+	}
+	if err := os.WriteFile(e.sessionStorePath, data, 0o600); err != nil {
+		return fmt.Errorf("write session store: %w", err)
+	}
+	return nil
+}
+
+func (e *Engine) getSessionID(sessionKey string) string {
+	e.sessionStoreMu.Lock()
+	defer e.sessionStoreMu.Unlock()
+	return e.sessionStore[sessionKey]
+}
+
+func (e *Engine) setSessionID(sessionKey, sessionID string) {
+	if sessionKey == "" || sessionID == "" {
+		return
+	}
+	e.sessionStoreMu.Lock()
+	e.sessionStore[sessionKey] = sessionID
+	e.sessionStoreMu.Unlock()
+	if err := e.saveSessionStore(); err != nil {
+		slog.Error("failed to save session store", "error", err)
+	}
+}
+
+func (e *Engine) deleteSessionID(sessionKey string) {
+	e.sessionStoreMu.Lock()
+	delete(e.sessionStore, sessionKey)
+	e.sessionStoreMu.Unlock()
+	if err := e.saveSessionStore(); err != nil {
+		slog.Error("failed to save session store", "error", err)
 	}
 }
 
@@ -112,6 +196,10 @@ func (e *Engine) Stop() error {
 	}
 	e.sessions = make(map[string]*sessionEntry)
 	e.sessionsMu.Unlock()
+
+	if err := e.saveSessionStore(); err != nil {
+		slog.Error("failed to save session store on stop", "error", err)
+	}
 
 	for _, a := range e.agents {
 		if err := a.Stop(); err != nil {
@@ -289,7 +377,7 @@ func (e *Engine) ensureSessionForEntry(ctx context.Context, ent *sessionEntry, s
 		return fmt.Errorf("unknown project %q", projectName)
 	}
 
-	s, err := agent.StartSession(ctx, sessionKey, project)
+	s, err := agent.StartSession(ctx, sessionKey, project, e.getSessionID(sessionKey))
 	if err != nil {
 		e.sessionsMu.Lock()
 		ent.status = "error"
@@ -304,6 +392,7 @@ func (e *Engine) ensureSessionForEntry(ctx context.Context, ent *sessionEntry, s
 		ent.session = s
 		ent.status = "idle"
 		ent.lastActivity = time.Now()
+		e.setSessionID(sessionKey, s.SessionID())
 	}
 	e.sessionsMu.Unlock()
 	return nil
@@ -484,6 +573,7 @@ func (e *Engine) handleNewCommand(ctx context.Context, p Platform, msg *Message)
 	}
 	delete(e.sessions, sessionKey)
 	e.sessionsMu.Unlock()
+	e.deleteSessionID(sessionKey)
 
 	if ok && ent != nil && ent.session != nil {
 		if err := ent.session.Close(); err != nil {
@@ -557,6 +647,7 @@ func (e *Engine) setSessionAgent(sessionKey, agentName string) {
 	ent.agent = agentName
 	ent.status = "idle"
 	ent.lastActivity = time.Now()
+	e.deleteSessionID(sessionKey)
 }
 
 func (e *Engine) setSessionProject(sessionKey, projectName string) {

@@ -30,10 +30,13 @@ type acpSession struct {
 	toolCount     int
 	currentTool   time.Time
 	sessionID     string
+	resumeSessionID string
 	history       []historyEntry
 	currentStatus string
 	lastActivityAt time.Time
 	onClose       func()
+	capLoadSession bool
+	capResumeSession bool
 }
 
 type historyEntry struct {
@@ -56,13 +59,14 @@ type promptResult struct {
 	} `json:"usage"`
 }
 
-func newACPSession(ctx context.Context, cfg agentConfig, sessionKey string, tr *transport) (*acpSession, error) {
+func newACPSession(ctx context.Context, cfg agentConfig, sessionKey string, resumeSessionID string, tr *transport) (*acpSession, error) {
 	s := &acpSession{
-		cfg:           cfg,
-		sessionKey:    sessionKey,
-		tr:            tr,
-		currentStatus: "idle",
-		lastActivityAt: time.Now(),
+		cfg:             cfg,
+		sessionKey:      sessionKey,
+		resumeSessionID: resumeSessionID,
+		tr:              tr,
+		currentStatus:   "idle",
+		lastActivityAt:  time.Now(),
 	}
 	if err := s.handshake(ctx); err != nil {
 		return nil, err
@@ -90,18 +94,45 @@ func (s *acpSession) handshake(ctx context.Context) error {
 		return fmt.Errorf("acp initialize: %w", err)
 	}
 	var initOut struct {
-		ProtocolVersion int `json:"protocolVersion"`
+		ProtocolVersion    int `json:"protocolVersion"`
+		AgentCapabilities  struct {
+			LoadSession bool `json:"loadSession"`
+			SessionCapabilities struct {
+				Resume json.RawMessage `json:"resume"`
+			} `json:"sessionCapabilities"`
+		} `json:"agentCapabilities"`
 	}
 	if err := json.Unmarshal(res, &initOut); err != nil {
 		return fmt.Errorf("acp parse initialize: %w", err)
 	}
-	slog.Debug("acp initialized", "protocol", initOut.ProtocolVersion)
+	s.capLoadSession = initOut.AgentCapabilities.LoadSession
+	s.capResumeSession = len(initOut.AgentCapabilities.SessionCapabilities.Resume) > 0
+	slog.Debug("acp initialized", "protocol", initOut.ProtocolVersion, "load_session", s.capLoadSession, "resume_session", s.capResumeSession)
 
 	// Authenticate if the agent advertises auth methods.
 	// The "agent" method uses local credentials already configured under ~/.omp.
 	// We attempt it unconditionally because many ACP agents require it.
 	if _, err := s.tr.call(ctx, "authenticate", map[string]any{"methodId": "agent"}); err != nil {
 		slog.Debug("acp authenticate skipped", "error", err)
+	}
+
+	// If we have a previously persisted session ID, try to resume it first.
+	if s.resumeSessionID != "" {
+		if s.capResumeSession {
+			if err := s.callSessionResume(ctx); err == nil {
+				return nil
+			} else {
+				slog.Warn("acp session/resume failed, starting new session", "session", s.sessionKey, "error", err)
+			}
+		} else if s.capLoadSession {
+			if err := s.callSessionLoad(ctx); err == nil {
+				return nil
+			} else {
+				slog.Warn("acp session/load failed, starting new session", "session", s.sessionKey, "error", err)
+			}
+		} else {
+			slog.Warn("acp session persistence not supported by agent, starting new session", "session", s.sessionKey)
+		}
 	}
 
 	newRes, err := s.tr.call(ctx, "session/new", map[string]any{
@@ -123,6 +154,41 @@ func (s *acpSession) handshake(ctx context.Context) error {
 	s.sessionID = sn.SessionID
 	slog.Debug("acp session created", "session_id", sn.SessionID, "omp_session", s.sessionKey)
 	return nil
+}
+
+func (s *acpSession) callSessionResume(ctx context.Context) error {
+	res, err := s.tr.call(ctx, "session/resume", map[string]any{
+		"sessionId":  s.resumeSessionID,
+		"cwd":        s.cfg.WorkDir,
+		"mcpServers": []any{},
+	})
+	if err != nil {
+		return err
+	}
+	s.sessionID = s.resumeSessionID
+	// The response may include session configuration; ignore unknown fields.
+	_ = res
+	slog.Debug("acp session resumed", "session_id", s.sessionID, "omp_session", s.sessionKey)
+	return nil
+}
+
+func (s *acpSession) callSessionLoad(ctx context.Context) error {
+	res, err := s.tr.call(ctx, "session/load", map[string]any{
+		"sessionId":  s.resumeSessionID,
+		"cwd":        s.cfg.WorkDir,
+		"mcpServers": []any{},
+	})
+	if err != nil {
+		return err
+	}
+	s.sessionID = s.resumeSessionID
+	_ = res
+	slog.Debug("acp session loaded", "session_id", s.sessionID, "omp_session", s.sessionKey)
+	return nil
+}
+
+func (s *acpSession) SessionID() string {
+	return s.sessionID
 }
 
 func (s *acpSession) Respond(ctx context.Context, prompt string, images []core.ImageAttachment) (string, []core.OutboundAttachment, error) {

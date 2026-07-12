@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // SupportedAgentNames lists agent names that have built-in implementations.
@@ -12,10 +13,13 @@ var SupportedAgentNames = []string{"omp"}
 
 // Config is the top-level configuration.
 type Config struct {
-	Agents    []string         `json:"agents"`
-	Projects  []ProjectConfig  `json:"projects"`
-	Defaults  DefaultsConfig   `json:"default"`
-	Platforms []PlatformConfig `json:"platforms"`
+	Agents       []string        `json:"agents"`
+	Projects     []ProjectConfig `json:"projects"`
+	Defaults     DefaultsConfig  `json:"default"`
+	Platforms    []PlatformConfig `json:"platforms"`
+	// SessionStore is the path to a JSON file that persists agent session IDs
+	// across restarts. If empty, it defaults to <user home>/.omp-im/sessions.json.
+	SessionStore string `json:"session_store,omitempty"`
 }
 
 // ProjectConfig configures a project with its own working directory.
@@ -125,7 +129,17 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// Project returns the project config with the given name, or false if missing.
+// SessionStorePath returns the effective path for persisting session IDs.
+func (c *Config) SessionStorePath() string {
+	if c.SessionStore != "" {
+		return c.SessionStore
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".", ".omp-im", "sessions.json")
+	}
+	return filepath.Join(home, ".omp-im", "sessions.json")
+}
 func (c *Config) Project(name string) (ProjectConfig, bool) {
 	for _, p := range c.Projects {
 		if p.Name == name {

@@ -22,7 +22,7 @@ type fakeAgent struct {
 
 func (a *fakeAgent) Name() string { return a.name }
 func (a *fakeAgent) Stop() error  { return nil }
-func (a *fakeAgent) StartSession(ctx context.Context, sessionKey string, project Project) (AgentSession, error) {
+func (a *fakeAgent) StartSession(ctx context.Context, sessionKey string, project Project, resumeSessionID string) (AgentSession, error) {
 	if a.err != nil {
 		return nil, a.err
 	}
@@ -30,7 +30,11 @@ func (a *fakeAgent) StartSession(ctx context.Context, sessionKey string, project
 	a.started++
 	delay := a.respondDelay
 	a.mu.Unlock()
-	return &fakeSession{reply: a.reply, attachments: a.attachments, project: project, delay: delay}, nil
+	sid := resumeSessionID
+	if sid == "" {
+		sid = "fake-" + sessionKey
+	}
+	return &fakeSession{reply: a.reply, attachments: a.attachments, project: project, delay: delay, sessionID: sid}, nil
 }
 func (a *fakeAgent) Started() int {
 	a.mu.Lock()
@@ -39,14 +43,19 @@ func (a *fakeAgent) Started() int {
 }
 
 type fakeSession struct {
-	reply       string
-	attachments []OutboundAttachment
-	project     Project
-	closed      bool
-	delay       time.Duration
-	history     []HistoryEntry
-	inputTokens int
+	reply        string
+	attachments  []OutboundAttachment
+	project      Project
+	closed       bool
+	delay        time.Duration
+	history      []HistoryEntry
+	inputTokens  int
 	outputTokens int
+	sessionID    string
+}
+
+func (s *fakeSession) SessionID() string {
+	return s.sessionID
 }
 
 func (s *fakeSession) Respond(ctx context.Context, prompt string, images []ImageAttachment) (string, []OutboundAttachment, error) {

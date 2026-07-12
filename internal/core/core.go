@@ -31,7 +31,9 @@ type MessageHandler func(p Platform, msg *Message)
 type Agent interface {
 	Name() string
 	// StartSession creates a session for the given conversation key and project.
-	StartSession(ctx context.Context, sessionKey string, project Project) (AgentSession, error)
+	// If resumeSessionID is non-empty, the agent should attempt to resume that
+	// session; otherwise it creates a new one.
+	StartSession(ctx context.Context, sessionKey string, project Project, resumeSessionID string) (AgentSession, error)
 	Stop() error
 }
 
@@ -65,6 +67,9 @@ type AgentSession interface {
 	// History returns the conversation context retained by the session.
 	History() []HistoryEntry
 	Close() error
+	// SessionID returns the agent-side session identifier, used to resume the
+	// conversation after a restart.
+	SessionID() string
 }
 
 // ImageSender is implemented by platforms that can send images.
