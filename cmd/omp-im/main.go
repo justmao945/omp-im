@@ -22,6 +22,15 @@ func main() {
 		configPath = flag.String("config", defaultConfigPath(), "path to config.json")
 		logLevel   = flag.String("log-level", "info", "log level: debug|info|warn|error")
 	)
+	flag.CommandLine.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s [flags] [command]\n\n", os.Args[0])
+		fmt.Fprintln(os.Stderr, "Commands:")
+		fmt.Fprintln(os.Stderr, "  omp-im                 Run the server (default)")
+		fmt.Fprintln(os.Stderr, "  omp-im weixin login    Perform Weixin QR-code login")
+		fmt.Fprintln(os.Stderr, "  omp-im weixin logout   Remove saved Weixin session")
+		fmt.Fprintln(os.Stderr, "\nFlags:")
+		flag.PrintDefaults()
+	}
 	flag.Parse()
 
 	setupLogger(*logLevel)
