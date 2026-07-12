@@ -631,11 +631,14 @@ func TestEnginePCommandShowsStatus(t *testing.T) {
 		t.Fatalf("got %d replies, want 2", len(replies))
 	}
 	pReply := replies[1]
-	if !strings.Contains(pReply, "**Tokens:**") {
-		t.Fatalf("/p reply missing tokens: %q", pReply)
+	if !strings.Contains(pReply, "**Agent:**") {
+		t.Fatalf("/p reply missing agent: %q", pReply)
 	}
-	if strings.Contains(pReply, "Status:") {
-		t.Fatalf("/p reply should not contain raw history markers: %q", pReply)
+	if !strings.Contains(pReply, "**Project:**") {
+		t.Fatalf("/p reply missing project: %q", pReply)
+	}
+	if strings.Contains(pReply, "Status:") || strings.Contains(pReply, "**Elapsed:**") || strings.Contains(pReply, "**Tools used:**") || strings.Contains(pReply, "**Current tool:**") || strings.Contains(pReply, "**Command:**") || strings.Contains(pReply, "**Tokens:**") {
+		t.Fatalf("/p reply should not contain elapsed/tools/command/tokens: %q", pReply)
 	}
 }
 

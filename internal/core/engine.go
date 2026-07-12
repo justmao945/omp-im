@@ -510,7 +510,7 @@ func (e *Engine) handleHelpCommand(ctx context.Context, p Platform, msg *Message
 		"- `/proj` — show the current project and available projects\n"+
 		"- `/proj <name>` — switch to the named project\n"+
 		"- `/esc` — cancel the currently generating reply\n"+
-		"- `/p` — show current agent, project, session status, and tool/model info\n"+
+		"- `/p` — show current agent, project, model, and context usage\n"+
 		"- `/new` — start a new session (closes the current one, next message starts fresh)\n"+
 		"- `/help`, `/?` — show this help")
 }
@@ -557,28 +557,9 @@ func (e *Engine) handlePCommand(ctx context.Context, p Platform, msg *Message) {
 		lines = append(lines, fmt.Sprintf("- **Reasoning effort:** %s", st.ReasoningEffort))
 	}
 
-	// Session state.
-	if st.TurnDuration > 0 {
-		lines = append(lines, fmt.Sprintf("- **Elapsed:** %s", formatDuration(st.TurnDuration)))
-	}
+	// Context usage.
 	if st.ContextSize > 0 {
 		lines = append(lines, fmt.Sprintf("- **Context:** %s", formatContext(st.ContextUsed, st.ContextSize)))
-	}
-
-	// Active tool.
-	if st.ToolCount > 0 {
-		lines = append(lines, fmt.Sprintf("- **Tools used:** %d", st.ToolCount))
-		if st.CurrentToolDuration > 0 {
-			lines = append(lines, fmt.Sprintf("- **Current tool:** %s", formatDuration(st.CurrentToolDuration)))
-		}
-	}
-	if st.CurrentToolCommand != "" {
-		lines = append(lines, fmt.Sprintf("- **Command:** `%s`", truncate(st.CurrentToolCommand, 120)))
-	}
-
-	// Token usage for this turn.
-	if st.InputTokens > 0 || st.OutputTokens > 0 {
-		lines = append(lines, fmt.Sprintf("- **Tokens:** %d / %d", st.InputTokens, st.OutputTokens))
 	}
 
 	_ = p.Reply(ctx, msg.ReplyCtx, strings.Join(lines, "\n"))

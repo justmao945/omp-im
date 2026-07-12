@@ -8,7 +8,7 @@ Send these as messages in any supported IM conversation.
 | `/agent <name>` | Switch to the named agent. The current session is closed; the next message starts a new session. |
 | `/proj` | Show the current project and available projects. |
 | `/proj <name>` | Switch to the named project. The current session is closed; the next message starts a new session in the new working directory. |
-| `/p` | Show current agent, project, session status, turn timing, tool usage, and token counts. |
+| `/p` | Show current agent, project, active model, and context usage. |
 | `/esc` | Cancel the currently generating agent reply. |
 | `/new` | Close the current session and start a fresh conversation on the next message. |
 | `/help`, `/?` | Show the command list. |
@@ -24,12 +24,7 @@ Send these as messages in any supported IM conversation.
 - **Project:** default
 - **Model:** kimi-code/kimi-for-coding
 - **Reasoning effort:** auto
-- **Elapsed:** 45s
 - **Context:** 8% / 262K
-- **Tools used:** 2
-- **Current tool:** 12s
-- **Command:** `mkdir -p caopan && ...`
-- **Tokens:** 1234 / 567
 ```
 
 - `Model` and `Reasoning effort` show the active model configuration from the agent.
