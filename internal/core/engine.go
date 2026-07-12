@@ -284,12 +284,13 @@ func (e *Engine) processNormalMessage(ctx context.Context, cancel context.Cancel
 				if err := streamer.StreamReply(ctx, msg.ReplyCtx, ev.Text, false); err != nil {
 					slog.Error("failed to stream reply", "session", msg.SessionKey, "error", err)
 				}
-			case "thinking", "tool_start", "tool_end":
+			case "thinking", "tool_start", "tool_end", "processing":
 				if err := streamer.StreamEvent(ctx, msg.ReplyCtx, ev); err != nil {
 					slog.Error("failed to stream event", "session", msg.SessionKey, "error", err)
 				}
 			}
 		}
+		onEvent(StreamEvent{Type: "processing"})
 		reply, attachments, err = Session.Respond(ctx, msg.Content, msg.Images, msg.Files, onEvent)
 		if err == nil {
 			if err := streamer.StreamReply(ctx, msg.ReplyCtx, "", true); err != nil {

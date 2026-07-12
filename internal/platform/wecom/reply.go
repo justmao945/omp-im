@@ -98,6 +98,10 @@ func (p *Platform) StreamEvent(ctx context.Context, replyCtx any, ev core.Stream
 	}
 
 	switch ev.Type {
+	case "processing":
+		if rc.turnStart.IsZero() {
+			rc.turnStart = time.Now()
+		}
 	case "thinking":
 		rc.thinkingText += ev.Text
 	case "tool_start":
@@ -197,6 +201,9 @@ func buildStreamContent(rc *replyContext, thinkingDisplay, toolDisplay string, f
 				}
 				parts = append(parts, fmt.Sprintf("🤔 thinking%s", elapsed))
 			}
+		case !rc.turnStart.IsZero():
+			// No thinking or tool yet: show that the turn is in progress.
+			parts = append(parts, fmt.Sprintf("⏳ 处理中... %s", formatDuration(time.Since(rc.turnStart))))
 		}
 	} else {
 		// Body text has arrived; show it instead of the status line.

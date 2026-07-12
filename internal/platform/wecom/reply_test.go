@@ -49,6 +49,24 @@ func TestBuildStreamContent(t *testing.T) {
 		wantNotContain string
 	}{
 		{
+			name: "processing before thinking",
+			setup: func(rc *replyContext) {
+				rc.turnStart = time.Now().Add(-3 * time.Second)
+			},
+			wantContains: []string{"处理中", "3s"},
+		},
+		{
+			name:     "processing hidden when body arrives",
+			thinking: "concise",
+			tool:     "concise",
+			setup: func(rc *replyContext) {
+				rc.turnStart = time.Now().Add(-3 * time.Second)
+				rc.streamText = "body text"
+			},
+			wantContains:   []string{"body text"},
+			wantNotContain: "处理中",
+		},
+		{
 			name:     "concise thinking",
 			thinking: "concise",
 			setup: func(rc *replyContext) {
@@ -257,6 +275,11 @@ func TestStreamFooter(t *testing.T) {
 
 func TestStreamEventUpdatesState(t *testing.T) {
 	rc := &replyContext{}
+	updateStreamEvent(rc, core.StreamEvent{Type: "processing"})
+	if rc.turnStart.IsZero() {
+		t.Fatalf("processing event should set turnStart")
+	}
+
 	updateStreamEvent(rc, core.StreamEvent{Type: "thinking", Text: "step 1"})
 	if !strings.Contains(rc.thinkingText, "step 1") {
 		t.Fatalf("thinking text not accumulated")
@@ -287,6 +310,10 @@ func TestStreamEventUpdatesState(t *testing.T) {
 
 func updateStreamEvent(rc *replyContext, ev core.StreamEvent) {
 	switch ev.Type {
+	case "processing":
+		if rc.turnStart.IsZero() {
+			rc.turnStart = time.Now()
+		}
 	case "thinking":
 		rc.thinkingText += ev.Text
 	case "tool_start":
