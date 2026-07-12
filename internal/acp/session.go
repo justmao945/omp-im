@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/justmao945/omp-im/internal/core"
 )
@@ -302,7 +303,7 @@ func (s *Session) SessionID() string {
 	return s.sessionID
 }
 
-func (s *Session) Respond(ctx context.Context, prompt string, images []core.ImageAttachment) (string, []core.OutboundAttachment, error) {
+func (s *Session) Respond(ctx context.Context, prompt string, images []core.ImageAttachment, files []core.FileAttachment, onText func(string)) (string, []core.OutboundAttachment, error) {
 	if s.sessionID == "" {
 		return "", nil, fmt.Errorf("acp: no session id")
 	}
@@ -316,7 +317,7 @@ func (s *Session) Respond(ctx context.Context, prompt string, images []core.Imag
 	s.startTurnStatus()
 	defer s.resetStatus()
 
-	blocks := []any{map[string]any{"type": "text", "text": prompt}}
+	blocks := []any{map[string]any{"type": "text", "text": buildPromptWithFiles(prompt, files)}}
 	for _, img := range images {
 		blocks = append(blocks, map[string]any{
 			"type":     "image",
@@ -340,6 +341,9 @@ func (s *Session) Respond(ctx context.Context, prompt string, images []core.Imag
 		case "session/update":
 			text := extractAgentText(params)
 			if text != "" {
+				if onText != nil {
+					onText(text)
+				}
 				mu.Lock()
 				textParts = append(textParts, text)
 				mu.Unlock()
@@ -555,6 +559,61 @@ func (s *Session) Close() error {
 		s.OnClose()
 	}
 	return err
+}
+
+// buildPromptWithFiles appends file descriptions or text-file contents to the prompt.
+// Binary files are described by name and MIME type; text-ish files include a short
+// content preview (capped so the prompt does not explode).
+func buildPromptWithFiles(prompt string, files []core.FileAttachment) string {
+	if len(files) == 0 {
+		return prompt
+	}
+	var b strings.Builder
+	b.WriteString(prompt)
+	for _, f := range files {
+		if f.FileName == "" && len(f.Data) == 0 {
+			continue
+		}
+		b.WriteString("\n\n[attached file: ")
+		if f.FileName != "" {
+			b.WriteString(f.FileName)
+			if f.MimeType != "" {
+				b.WriteString(" (")
+				b.WriteString(f.MimeType)
+				b.WriteString(")")
+			}
+		} else {
+			b.WriteString("unnamed")
+		}
+		b.WriteString("]")
+		if isTextFile(f.MimeType, f.FileName) && utf8.Valid(f.Data) {
+			const maxFileBytes = 50000
+			content := string(f.Data)
+			if len(f.Data) > maxFileBytes {
+				content = string(f.Data[:maxFileBytes]) + "\n... (truncated)"
+			}
+			b.WriteString("\n")
+			b.WriteString(content)
+		}
+	}
+	return b.String()
+}
+
+// isTextFile returns true if the file is likely text based on its MIME type or extension.
+func isTextFile(mt, filename string) bool {
+	if strings.HasPrefix(mt, "text/") {
+		return true
+	}
+	switch mt {
+	case "application/json", "application/javascript", "application/xml", "application/x-yaml", "application/x-shellscript", "application/x-httpd-php":
+		return true
+	}
+	for _, ext := range []string{".txt", ".md", ".markdown", ".json", ".js", ".ts", ".jsx", ".tsx", ".yaml", ".yml", ".xml", ".html", ".htm", ".css", ".scss", ".sass", ".go", ".py", ".pyw", ".sh", ".bash", ".zsh", ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".java", ".rs", ".rb", ".php", ".sql", ".csv", ".tsv", ".log", ".ini", ".conf", ".toml", ".cfg"} {
+		if strings.HasSuffix(strings.ToLower(filename), ext) {
+			return true
+		}
+	}
+	return false
 }
 
 func imageMimeType(mt string) string {

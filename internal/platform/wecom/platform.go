@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -90,7 +91,43 @@ func (p *Platform) Reply(ctx context.Context, replyCtx any, content string) erro
 		return fmt.Errorf("wecom: missing chatid in reply context")
 	}
 	_ = ctx
+	if looksLikeMarkdown(content) && len(content) <= maxMarkdownContentBytes {
+		return p.sendMarkdownReply(rc, content)
+	}
 	return p.sendTextReply(rc, content)
+}
+
+// maxMarkdownContentBytes is a conservative size limit for a single markdown message.
+const maxMarkdownContentBytes = 4096
+
+// sendMarkdownReply sends a passive markdown reply to the chat that triggered the inbound message.
+func (p *Platform) sendMarkdownReply(rc *replyContext, text string) error {
+	if rc == nil || rc.chatid == "" {
+		return fmt.Errorf("wecom: chatid is empty")
+	}
+	if text == "" {
+		return nil
+	}
+	body := map[string]interface{}{
+		"msgtype": "markdown",
+		"markdown": map[string]interface{}{
+			"content": text,
+		},
+	}
+	if rc.reqID != "" {
+		return p.respond(rc.reqID, body)
+	}
+	return p.sendActiveMessage(rc.chatid, rc.chattype, body)
+}
+
+// looksLikeMarkdown returns true if the text contains common markdown syntax.
+func looksLikeMarkdown(s string) bool {
+	for _, marker := range []string{"#", "*", "`", "[", ">![", "|", "-", ">", "~~~"} {
+		if strings.Contains(s, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // handleFrame is called by the websocket client for every inbound frame.
@@ -127,6 +164,7 @@ func (p *Platform) handleFrame(frame *wsFrame) {
 	slog.Debug("wecom: collected inbound images", "msgtype", msg.msgtype, "expected", len(msg.images), "collected", len(images))
 
 	sessionKey := fmt.Sprintf("wecom:%s", msg.chatid)
+	files := p.collectInboundFiles(context.Background(), msg)
 	coreMsg := &core.Message{
 		SessionKey: sessionKey,
 		Platform:   p.Name(),
@@ -135,6 +173,7 @@ func (p *Platform) handleFrame(frame *wsFrame) {
 		UserID:     msg.from,
 		Content:    msg.text,
 		Images:     images,
+		Files:      files,
 		ReplyCtx:   &replyContext{chatid: msg.chatid, chattype: msg.chattype, reqID: msg.reqID, aibotid: msg.aibotid},
 	}
 

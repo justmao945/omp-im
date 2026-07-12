@@ -14,6 +14,12 @@ type Project struct {
 	WorkDir string
 }
 
+type StreamReplyer interface {
+	// StreamReply sends a streaming text delta to the user identified by replyCtx.
+	// finished is true when the assistant turn has ended and no more deltas follow.
+	StreamReply(ctx context.Context, replyCtx any, delta string, finished bool) error
+}
+
 // Platform abstracts a messaging platform (Weixin, WeCom, etc.).
 type Platform interface {
 	Name() string
@@ -62,7 +68,8 @@ type AgentStatus struct {
 type AgentSession interface {
 	// Respond sends the current conversation turn to the agent and returns
 	// the assistant's text reply along with any files/images the agent produced.
-	Respond(ctx context.Context, prompt string, images []ImageAttachment) (string, []OutboundAttachment, error)
+	// onText is called for each streaming text delta; it may be nil.
+	Respond(ctx context.Context, prompt string, images []ImageAttachment, files []FileAttachment, onText func(string)) (string, []OutboundAttachment, error)
 	// Status returns the current state of the session (idle, thinking, using_tools, etc.)
 	// along with turn timing and usage information.
 	Status() AgentStatus

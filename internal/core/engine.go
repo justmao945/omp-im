@@ -273,7 +273,25 @@ func (e *Engine) processNormalMessage(ctx context.Context, cancel context.Cancel
 	e.activeTurns[msg.SessionKey] = cancel
 	e.activeTurnsMu.Unlock()
 
-	reply, attachments, err := Session.Respond(ctx, msg.Content, msg.Images)
+	var reply string
+	var attachments []OutboundAttachment
+	var err error
+
+	if streamer, ok := p.(StreamReplyer); ok {
+		onText := func(delta string) {
+			if err := streamer.StreamReply(ctx, msg.ReplyCtx, delta, false); err != nil {
+				slog.Error("failed to stream reply", "session", msg.SessionKey, "error", err)
+			}
+		}
+		reply, attachments, err = Session.Respond(ctx, msg.Content, msg.Images, msg.Files, onText)
+		if err == nil {
+			if err := streamer.StreamReply(ctx, msg.ReplyCtx, "", true); err != nil {
+				slog.Error("failed to finish stream reply", "session", msg.SessionKey, "error", err)
+			}
+		}
+	} else {
+		reply, attachments, err = Session.Respond(ctx, msg.Content, msg.Images, msg.Files, nil)
+	}
 
 	e.activeTurnsMu.Lock()
 	delete(e.activeTurns, msg.SessionKey)
@@ -297,8 +315,10 @@ func (e *Engine) processNormalMessage(ctx context.Context, cancel context.Cancel
 
 	slog.Info("agent turn finished", "session", msg.SessionKey, "reply_len", len(reply), "attachments", len(attachments))
 
-	if err := p.Reply(ctx, msg.ReplyCtx, reply); err != nil {
-		slog.Error("failed to send reply", "session", msg.SessionKey, "error", err)
+	if _, streaming := p.(StreamReplyer); !streaming {
+		if err := p.Reply(ctx, msg.ReplyCtx, reply); err != nil {
+			slog.Error("failed to send reply", "session", msg.SessionKey, "error", err)
+		}
 	}
 
 	for _, a := range attachments {

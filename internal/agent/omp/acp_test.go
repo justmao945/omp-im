@@ -28,7 +28,7 @@ func TestACPSessionRespond(t *testing.T) {
 	}
 	defer session.Close()
 
-	reply, _, err := session.Respond(ctx, "what is 2+2? reply with one number", nil)
+	reply, _, err := session.Respond(ctx, "what is 2+2? reply with one number", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("respond: %v", err)
 	}
@@ -54,11 +54,11 @@ func TestACPSessionMultiTurn(t *testing.T) {
 	}
 	defer session.Close()
 
-	_, _, err = session.Respond(ctx, "remember my name is Bob", nil)
+	_, _, err = session.Respond(ctx, "remember my name is Bob", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("turn 1: %v", err)
 	}
-	reply, _, err := session.Respond(ctx, "what is my name?", nil)
+	reply, _, err := session.Respond(ctx, "what is my name?", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("turn 2: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestACPSessionGeneratesFile(t *testing.T) {
 
 	path := filepath.Join(workDir, "hello-omp.txt")
 	prompt := fmt.Sprintf("create a file at %s with content 'hello from omp' and reply only with the absolute path", path)
-	reply, attachments, err := session.Respond(ctx, prompt, nil)
+	reply, attachments, err := session.Respond(ctx, prompt, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("respond: %v", err)
 	}

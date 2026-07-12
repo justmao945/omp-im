@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -19,6 +20,75 @@ import (
 )
 
 const maxWecomMediaBytes = 100 << 20
+
+// downloadFile fetches and decrypts a generic file attachment from the WeCom CDN.
+func downloadFile(ctx context.Context, client *http.Client, f fileAttachment) (core.FileAttachment, error) {
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	slog.Debug("wecom: downloading file", "url", f.url, "has_aeskey", f.aeskey != "", "filename", f.filename)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.url, nil)
+	if err != nil {
+		return core.FileAttachment{}, fmt.Errorf("wecom file: new request: %w", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return core.FileAttachment{}, fmt.Errorf("wecom file: get: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxWecomMediaBytes+1))
+	if err != nil {
+		return core.FileAttachment{}, fmt.Errorf("wecom file: read: %w", err)
+	}
+	if len(body) > maxWecomMediaBytes {
+		return core.FileAttachment{}, fmt.Errorf("wecom file: exceeds %d bytes", maxWecomMediaBytes)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return core.FileAttachment{}, fmt.Errorf("wecom file: http %d: %s", resp.StatusCode, truncate(string(body), 256))
+	}
+
+	filename := f.filename
+	if filename == "" {
+		filename = parseContentDispositionFilename(resp.Header.Get("Content-Disposition"))
+	}
+	if filename == "" {
+		filename = filepath.Base(resp.Request.URL.Path)
+	}
+	if filename == "" {
+		filename = filepath.Base(f.url)
+	}
+
+	var data []byte
+	if f.aeskey == "" {
+		data = body
+	} else {
+		plain, err := decryptWecomAES(body, f.aeskey)
+		if err != nil {
+			return core.FileAttachment{}, fmt.Errorf("wecom file: decrypt: %w", err)
+		}
+		data = plain
+	}
+
+	mt := detectMimeType(data, filename)
+	slog.Debug("wecom: file downloaded", "filename", filename, "mime", mt, "bytes", len(data))
+	return core.FileAttachment{FileName: filename, MimeType: mt, Data: data}, nil
+}
+
+// detectMimeType tries to determine the MIME type from content sniffing and filename extension.
+func detectMimeType(data []byte, filename string) string {
+	if mt := http.DetectContentType(data); mt != "application/octet-stream" {
+		return mt
+	}
+	if ext := filepath.Ext(filename); ext != "" {
+		if mt := mime.TypeByExtension(ext); mt != "" {
+			return mt
+		}
+	}
+	return "application/octet-stream"
+}
 
 // downloadImage fetches and decrypts an image from the WeCom CDN.
 func downloadImage(ctx context.Context, client *http.Client, img imageAttachment) (core.ImageAttachment, error) {
@@ -207,6 +277,35 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max] + "..."
+}
+
+// collectInboundFiles downloads file attachments referenced by an inbound message.
+func (p *Platform) collectInboundFiles(ctx context.Context, msg *inboundMessage) []core.FileAttachment {
+	if msg == nil || len(msg.files) == 0 {
+		slog.Debug("wecom: no files to collect", "msgtype", msg.msgtype)
+		return nil
+	}
+	dlCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	client := p.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	var result []core.FileAttachment
+	for i, f := range msg.files {
+		at, err := downloadFile(dlCtx, client, f)
+		if err != nil {
+			slog.Warn("wecom: failed to download file", "index", i, "url", f.url, "error", err)
+			continue
+		}
+		result = append(result, at)
+		slog.Info("wecom: file collected", "index", i, "filename", at.FileName, "mime", at.MimeType, "bytes", len(at.Data))
+	}
+	if len(result) == 0 && len(msg.files) > 0 {
+		slog.Warn("wecom: all file downloads failed", "count", len(msg.files), "msgtype", msg.msgtype)
+	}
+	return result
 }
 
 // collectInboundImages downloads images referenced by an inbound message.

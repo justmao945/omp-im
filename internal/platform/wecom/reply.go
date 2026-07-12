@@ -1,6 +1,7 @@
 package wecom
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"unicode/utf8"
@@ -33,6 +34,43 @@ func (p *Platform) sendTextReply(rc *replyContext, text string) error {
 		if err := p.respond(rc.reqID, body); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// StreamReply implements core.StreamReplyer. It sends a single stream chunk for
+// the current turn. The first call initializes the shared stream id, and the
+// finished chunk signals the end of the turn.
+func (p *Platform) StreamReply(ctx context.Context, replyCtx any, delta string, finished bool) error {
+	rc, ok := replyCtx.(*replyContext)
+	if !ok {
+		return fmt.Errorf("wecom: invalid reply context")
+	}
+	if rc.chatid == "" {
+		return fmt.Errorf("wecom: chatid is empty")
+	}
+	if rc.streamID == "" {
+		rc.streamID = generateReqID()
+	}
+	body := map[string]interface{}{
+		"msgtype": "stream",
+		"stream": map[string]interface{}{
+			"id":      rc.streamID,
+			"finish":  finished,
+			"content": delta,
+		},
+	}
+	if rc.reqID != "" {
+		if err := p.respond(rc.reqID, body); err != nil {
+			return err
+		}
+	} else {
+		if err := p.sendActiveMessage(rc.chatid, rc.chattype, body); err != nil {
+			return err
+		}
+	}
+	if finished {
+		slog.Debug("wecom: finished stream reply")
 	}
 	return nil
 }

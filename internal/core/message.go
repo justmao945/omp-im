@@ -43,6 +43,8 @@ type Message struct {
 	Content string
 	// Images are attached images (if any).
 	Images []ImageAttachment
+	// Files are attached files (if any).
+	Files []FileAttachment
 	// ReplyCtx is platform-specific data needed to reply to this message.
 	ReplyCtx any
 }
