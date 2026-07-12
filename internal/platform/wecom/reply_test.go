@@ -237,8 +237,29 @@ func TestBuildStreamContent(t *testing.T) {
 					end:    time.Now().Add(-2 * time.Second),
 				}}
 			},
-			wantContains:   []string{"result", "⏱️ 10s", "🛠️ 1 tools"},
+			wantContains:   []string{"result", "⏱️ 10s", "🛠️ 1"},
 			wantNotContain: "root:x",
+		},
+		{
+			name:     "thinking split around tools",
+			thinking: "detailed",
+			tool:     "detailed",
+			setup: func(rc *replyContext) {
+				rc.streamBody = []streamSection{
+					{kind: "thinking", text: "step 1"},
+					{kind: "thinking", text: "step 2"},
+					{kind: "tool", text: "🔧 ls\npath=/tmp"},
+					{kind: "thinking", text: "step 3"},
+				}
+			},
+			wantContains: []string{
+				"> step 1",
+				"> step 2",
+				"> step 3",
+				"> 🔧 ls",
+				"> path=/tmp",
+			},
+			wantNotContain: "> step 1\n\n> step 2\n\n> step 3",
 		},
 		{
 			name:     "detailed tool result hidden",

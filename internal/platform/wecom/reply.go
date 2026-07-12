@@ -140,10 +140,17 @@ func (p *Platform) StreamEvent(ctx context.Context, replyCtx any, ev core.Stream
 		}
 	case "thinking":
 		rc.thinkingText += ev.Text
-		if idx := streamSectionIndex(rc.streamBody, "thinking"); idx == -1 {
-			rc.streamBody = append(rc.streamBody, streamSection{kind: "thinking", text: ev.Text})
+		if rc.thinkingEnd.IsZero() {
+			// Current thinking section is still open; append to it.
+			if idx := lastStreamSectionIndex(rc.streamBody, "thinking"); idx != -1 {
+				rc.streamBody[idx].text += ev.Text
+			} else {
+				rc.streamBody = append(rc.streamBody, streamSection{kind: "thinking", text: ev.Text})
+			}
 		} else {
-			rc.streamBody[idx].text += ev.Text
+			// Thinking was closed by a tool or body text; start a new section.
+			rc.streamBody = append(rc.streamBody, streamSection{kind: "thinking", text: ev.Text})
+			rc.thinkingEnd = time.Time{}
 		}
 		if ev.Status.ContextSize > 0 {
 			rc.contextUsed = ev.Status.ContextUsed
@@ -263,6 +270,17 @@ func (p *Platform) renderStream(ctx context.Context, rc *replyContext, finished 
 		slog.Debug("wecom: finished stream reply")
 	}
 	return nil
+}
+
+// lastStreamSectionIndex returns the last index of a section with the given kind,
+// or -1 if none exists.
+func lastStreamSectionIndex(sections []streamSection, kind string) int {
+	for i := len(sections) - 1; i >= 0; i-- {
+		if sections[i].kind == kind {
+			return i
+		}
+	}
+	return -1
 }
 
 // streamSectionIndex returns the first index of a section with the given kind,
@@ -388,7 +406,7 @@ func buildStreamFooter(rc *replyContext, thinkingDisplay, toolDisplay string) st
 		items = append(items, fmt.Sprintf("🧠 %d%%", pct))
 	}
 	if (thinkingDisplay == "detailed" || toolDisplay == "detailed") && rc.toolCount > 0 {
-		items = append(items, fmt.Sprintf("🛠️ %d tools", rc.toolCount))
+		items = append(items, fmt.Sprintf("🛠️ %d", rc.toolCount))
 	}
 	return strings.Join(items, " · ")
 }
