@@ -113,6 +113,15 @@ func runServer(configPath string) error {
 		agents[name] = a
 	}
 
+	for _, pc := range cfg.Projects {
+		if pc.WorkDir == "" {
+			continue
+		}
+		if err := os.MkdirAll(pc.WorkDir, 0o755); err != nil {
+			return fmt.Errorf("create project work_dir %s: %w", pc.WorkDir, err)
+		}
+	}
+
 	projects := make(map[string]core.Project, len(cfg.Projects))
 	for _, pc := range cfg.Projects {
 		projects[pc.Name] = core.Project{Name: pc.Name, WorkDir: pc.WorkDir}
