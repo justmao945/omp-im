@@ -34,10 +34,6 @@ type Engine struct {
 
 	activeTurns   map[string]context.CancelFunc
 	activeTurnsMu sync.Mutex
-
-	// MaxHistoryTurns limits how many user/assistant exchanges are kept
-	// in a session's implicit context. 0 means unlimited.
-	MaxHistoryTurns int
 }
 
 type queuedMessage struct {
@@ -75,7 +71,6 @@ func NewEngine(agents map[string]Agent, defaultAgent string, projects map[string
 		sessions:        make(map[string]*sessionEntry),
 		sessionStore:    make(map[string]string),
 		activeTurns:     make(map[string]context.CancelFunc),
-		MaxHistoryTurns: 20,
 	}
 }
 
@@ -274,7 +269,7 @@ func (e *Engine) sessionWorker(sessionKey string) {
 func (e *Engine) processNormalMessage(ctx context.Context, cancel context.CancelFunc, p Platform, msg *Message, ent *sessionEntry) {
 	if err := e.ensureSessionForEntry(ctx, ent, msg.SessionKey); err != nil {
 		slog.Error("failed to start session", "session", msg.SessionKey, "error", err)
-		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("无法启动会话: %v", err))
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Failed to start session: %v", err))
 		return
 	}
 
@@ -307,11 +302,11 @@ func (e *Engine) processNormalMessage(ctx context.Context, cancel context.Cancel
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			slog.Error("agent turn timed out", "session", msg.SessionKey, "error", err)
-			_ = p.Reply(ctx, msg.ReplyCtx, "处理超时，请重试或发送 /esc 中断")
+			_ = p.Reply(ctx, msg.ReplyCtx, "Processing timed out. Please retry or send /esc to cancel.")
 			return
 		}
 		slog.Error("agent turn error", "session", msg.SessionKey, "error", err)
-		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("处理失败: %v", err))
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Processing failed: %v", err))
 		return
 	}
 
@@ -447,7 +442,7 @@ func (e *Engine) handleCommand(ctx context.Context, p Platform, msg *Message, cm
 	case "new":
 		e.handleNewCommand(ctx, p, msg)
 	default:
-		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("未知命令: /%s", cmd.name))
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Unknown command: /%s", cmd.name))
 	}
 }
 
@@ -460,15 +455,15 @@ func (e *Engine) handleAgentCommand(ctx context.Context, p Platform, msg *Messag
 			names = append(names, name)
 		}
 		sort.Strings(names)
-		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("当前 agent: %s\n可用: %s", current, strings.Join(names, ", ")))
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Current agent: %s\nAvailable: %s", current, strings.Join(names, ", ")))
 		return
 	}
 	if _, ok := e.agents[arg]; !ok {
-		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("未知 agent: %s", arg))
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Unknown agent: %s", arg))
 		return
 	}
 	e.setSessionAgent(sessionKey, arg)
-	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("已切换 agent 为 %s，下条消息生效", arg))
+	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Switched agent to %s. Takes effect on the next message.", arg))
 }
 
 func (e *Engine) handleProjCommand(ctx context.Context, p Platform, msg *Message, arg string) {
@@ -480,27 +475,27 @@ func (e *Engine) handleProjCommand(ctx context.Context, p Platform, msg *Message
 			names = append(names, name)
 		}
 		sort.Strings(names)
-		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("当前 project: %s\n可用: %s", current, strings.Join(names, ", ")))
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Current project: %s\nAvailable: %s", current, strings.Join(names, ", ")))
 		return
 	}
 	if _, ok := e.projects[arg]; !ok {
-		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("未知 project: %s", arg))
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Unknown project: %s", arg))
 		return
 	}
 	e.setSessionProject(sessionKey, arg)
-	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("已切换 project 为 %s，下条消息生效", arg))
+	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Switched project to %s. Takes effect on the next message.", arg))
 }
 
 func (e *Engine) handleHelpCommand(ctx context.Context, p Platform, msg *Message) {
-	_ = p.Reply(ctx, msg.ReplyCtx, `可用命令：
-/agent — 显示当前 agent 和可用 agents
-/agent <name> — 切换到指定 agent
-/proj — 显示当前 project 和可用 projects
-/proj <name> — 切换到指定 project
-/esc — 中断当前正在生成的回复
-/p — 查看当前 agent、project、会话状态和工具/模型信息
-/new — 新建会话（关闭当前 session，下条消息开启新对话）
-/help, /? — 显示本帮助`)
+	_ = p.Reply(ctx, msg.ReplyCtx, `Available commands:
+/agent — show the current agent and available agents
+/agent <name> — switch to the named agent
+/proj — show the current project and available projects
+/proj <name> — switch to the named project
+/esc — cancel the currently generating reply
+/p — show current agent, project, session status, and tool/model info
+/new — start a new session (closes the current one, next message starts fresh)
+/help, /? — show this help`)
 }
 
 func (e *Engine) handleEscCommand(ctx context.Context, p Platform, msg *Message) {
@@ -509,10 +504,10 @@ func (e *Engine) handleEscCommand(ctx context.Context, p Platform, msg *Message)
 	e.activeTurnsMu.Unlock()
 	if ok {
 		cancel()
-		_ = p.Reply(ctx, msg.ReplyCtx, "已中断当前回复")
+		_ = p.Reply(ctx, msg.ReplyCtx, "Current reply cancelled.")
 		return
 	}
-	_ = p.Reply(ctx, msg.ReplyCtx, "当前没有正在生成的回复")
+	_ = p.Reply(ctx, msg.ReplyCtx, "No reply is currently being generated.")
 }
 
 func (e *Engine) handlePCommand(ctx context.Context, p Platform, msg *Message) {
@@ -529,33 +524,33 @@ func (e *Engine) handlePCommand(ctx context.Context, p Platform, msg *Message) {
 	e.sessionsMu.Unlock()
 
 	if !ok || ent == nil || ent.session == nil {
-		lines = append(lines, "状态: idle")
+		lines = append(lines, "Status: idle")
 		_ = p.Reply(ctx, msg.ReplyCtx, strings.Join(lines, "\n"))
 		return
 	}
 
 	st := ent.session.Status()
 	if st.Model != "" {
-		lines = append(lines, fmt.Sprintf("模型: %s", st.Model))
+		lines = append(lines, fmt.Sprintf("Model: %s", st.Model))
 	}
-	lines = append(lines, fmt.Sprintf("状态: %s", st.State))
+	lines = append(lines, fmt.Sprintf("Status: %s", st.State))
 	if st.TurnDuration > 0 {
-		lines = append(lines, fmt.Sprintf("已进行: %s", formatDuration(st.TurnDuration)))
+		lines = append(lines, fmt.Sprintf("Elapsed: %s", formatDuration(st.TurnDuration)))
 	}
 	if st.ToolCount > 0 {
-		lines = append(lines, fmt.Sprintf("已调用工具: %d", st.ToolCount))
+		lines = append(lines, fmt.Sprintf("Tools used: %d", st.ToolCount))
 		if st.CurrentToolDuration > 0 {
-			lines = append(lines, fmt.Sprintf("当前工具: %s", formatDuration(st.CurrentToolDuration)))
+			lines = append(lines, fmt.Sprintf("Current tool: %s", formatDuration(st.CurrentToolDuration)))
 		}
 	}
 	if st.CurrentToolCommand != "" {
-		lines = append(lines, fmt.Sprintf("命令: %s", truncate(st.CurrentToolCommand, 120)))
+		lines = append(lines, fmt.Sprintf("Command: %s", truncate(st.CurrentToolCommand, 120)))
 	}
 	if st.InputTokens > 0 || st.OutputTokens > 0 {
 		lines = append(lines, fmt.Sprintf("Tokens: %d / %d", st.InputTokens, st.OutputTokens))
 	}
 	if st.ReasoningEffort != "" {
-		lines = append(lines, fmt.Sprintf("思考强度: %s", st.ReasoningEffort))
+		lines = append(lines, fmt.Sprintf("Reasoning effort: %s", st.ReasoningEffort))
 	}
 
 	_ = p.Reply(ctx, msg.ReplyCtx, strings.Join(lines, "\n"))
@@ -581,7 +576,7 @@ func (e *Engine) handleNewCommand(ctx context.Context, p Platform, msg *Message)
 		}
 	}
 
-	_ = p.Reply(ctx, msg.ReplyCtx, "已新建会话，下条消息开始新对话")
+	_ = p.Reply(ctx, msg.ReplyCtx, "New session created. The next message will start a fresh conversation.")
 }
 
 func formatDuration(d time.Duration) string {

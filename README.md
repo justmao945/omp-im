@@ -5,7 +5,6 @@ IM connector for local AI agents. Currently supports Weixin (personal) via the i
 ## Run
 
 ```bash
-# Config is loaded from ~/.omp-im/config.json by default.
 mkdir -p ~/.omp-im
 cp config.example.json ~/.omp-im/config.json
 # Edit projects and optionally set Weixin token, then run.
@@ -25,67 +24,37 @@ omp-im
 
 All working data is stored under `~/.omp-im`.
 
+## Quick links
+
+- [Configuration](docs/config.md)
+- [Chat commands](docs/commands.md)
+- [ACP integration](docs/acp.md)
+
 ## Architecture
 
-- `internal/core` — `Platform` / `Agent` / `Engine` abstractions, slash-command dispatch.
+- `internal/core` — `Platform` / `Agent` / `Engine` abstractions, slash-command dispatch, and session persistence.
 - `internal/platform/weixin` — iLink long-poll inbound + media outbound; QR-code login.
 - `internal/agent` — factory for built-in agents (`omp`, future `claude` / `codex`).
-- `internal/agent/omp` — ACP adapter: JSON-RPC over `omp acp` stdio.
+- `internal/agent/omp` — ACP adapter: JSON-RPC over `omp acp` stdio, with optional `session/resume` or `session/load`.
 - `cmd/omp-im` — entry point.
-
-## Configuration
-
-```json
-{
-  "agents": ["omp"],
-  "projects": [
-    { "name": "default", "work_dir": "/path/to/project" }
-  ],
-  "default": {
-    "agent": "omp",
-    "project": "default"
-  },
-  "platforms": [
-    {
-      "type": "weixin",
-      "options": {
-        "allow_from": "*"
-      }
-    }
-  ]
-}
-```
-
-- `agents` — list of built-in agent names to enable. Currently only `omp` is supported.
-- `projects` — working directories passed to the agent when starting a session.
-- `default` — global default agent and project for new sessions.
-- `platforms` — IM platforms. Weixin supports both pre-configured token and QR-code login.
 
 ## Weixin setup
 
 ### QR-code login (recommended)
 
-Leave `platforms[0].options.token` empty and run the login subcommand:
+Leave `platforms[0].options.token` empty and run:
 
 ```bash
 omp-im weixin login
 ```
 
-iLink returns a login URL; `omp-im` renders it as an ASCII QR code in the terminal and also saves it as `~/.omp-im/weixin/default/login-qr.png`. Scan the terminal QR code with WeChat, confirm on your phone, and the login token is persisted to `~/.omp-im/weixin/default/session.json`. After that, start the server normally:
-
-```bash
-omp-im
-```
-
-Subsequent restarts reuse the saved session automatically.
+Scan the terminal QR code with WeChat. The login state is saved to `~/.omp-im/weixin/default/session.json` and reused on restart.
 
 ### Token login
 
-If you already have an iLink bot Bearer token, set `platforms[0].options.token` and the platform skips QR login.
+If you already have an iLink bot Bearer token, set `platforms[0].options.token`.
 
 ### Logout
-
-To remove the saved Weixin session and force re-login:
 
 ```bash
 omp-im weixin logout
@@ -97,39 +66,22 @@ Set `allow_from` to a comma-separated list of Weixin user IDs to restrict sender
 
 ## Chat commands
 
-Send these commands in any Weixin conversation:
+- `/agent` / `/agent <name>` — show or switch agent.
+- `/proj` / `/proj <name>` — show or switch project (working directory).
+- `/p` — show current agent, project, turn status, and token usage.
+- `/esc` — cancel the current reply.
+- `/new` — start a fresh session.
+- `/help`, `/?` — show help.
 
-- `/agent` — show current agent and available agents.
-- `/agent <name>` — switch the current conversation to a different agent; the existing session is closed and restarted on the next message.
-- `/proj` — show current project and available projects.
-- `/proj <name>` — switch the current conversation to a different project (changes the agent's working directory).
-- `/list` — list active sessions of the current agent, read from the agent itself, with project and status.
-- `/esc` — interrupt the currently running agent reply.
-- `/p` — show current agent, project, turn status (thinking/tool usage/tokens), and recent conversation context.
-- `/new` — start a fresh session; the current session is closed and the next message creates a new one.
-- `/help`, `/?` — show this help.
+See [docs/commands.md](docs/commands.md) for details.
 
-## Agent backend
+## Session persistence across restarts
 
-`omp-im` speaks the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) to the local `omp` CLI:
-
-- One ACP session is created per conversation (`session/new`).
-- Each incoming message is sent via `session/prompt`.
-- Assistant text is streamed through `session/update` notifications and delivered back to Weixin.
-- Tool permission requests are auto-approved when the built-in `omp` agent is used.
-- Images attached to Weixin messages are forwarded as ACP image content blocks.
-- Session state read from agent: ✅
+`omp-im` persists agent session IDs to `~/.omp-im/sessions.json`. On restart, it attempts to resume previous ACP sessions via `session/resume` or `session/load` if the agent supports it. If not, the conversation starts fresh. Explicit `/new` or switching agent/project clears the persisted session ID.
 
 ## Development
 
-This project depends on `github.com/skip2/go-qrcode` for terminal QR-code output. If the default Go module proxy is slow or unreachable, use a domestic mirror:
-
-```bash
-GOPROXY=https://goproxy.cn go mod download
-GOPROXY=https://goproxy.cn go build ./...
-```
-
-Or set it globally:
+If the default Go module proxy is slow or unreachable, use a domestic mirror:
 
 ```bash
 go env -w GOPROXY=https://goproxy.cn,direct
@@ -139,10 +91,10 @@ go env -w GOPROXY=https://goproxy.cn,direct
 
 - Text messages: ✅
 - Multi-turn sessions via ACP: ✅
-- Images from Weixin to omp: ✅
-- Tool execution (auto-approved): ✅
+- Images from Weixin to agent: ✅
+- Tool execution (auto-approved with built-in `omp`): ✅
 - Sending images/files back to Weixin: ✅
 - Multi-agent switching: ✅
 - Per-project working directories: ✅
 - Weixin QR-code login: ✅
-- Session state read from agent: ✅
+- Session persistence across restarts: ✅

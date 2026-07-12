@@ -263,7 +263,7 @@ func TestEngineSessionCreationFailure(t *testing.T) {
 	p.mu.Lock()
 	replies := append([]string(nil), p.replies...)
 	p.mu.Unlock()
-	if len(replies) != 1 || !strings.Contains(replies[0], "无法启动会话") {
+	if len(replies) != 1 || !strings.Contains(replies[0], "Failed to start session") {
 		t.Fatalf("replies = %v", replies)
 	}
 }
@@ -368,7 +368,7 @@ func TestEngineAgentCommand(t *testing.T) {
 	if len(replies) < 2 {
 		t.Fatalf("got %d replies, want at least 2", len(replies))
 	}
-	if replies[0] != "已切换 agent 为 claude，下条消息生效" {
+	if replies[0] != "Switched agent to claude. Takes effect on the next message." {
 		t.Fatalf("first reply = %q", replies[0])
 	}
 	if replies[len(replies)-1] != "claude-reply:hello" {
@@ -448,7 +448,7 @@ func TestEngineUnknownCommand(t *testing.T) {
 	replies := append([]string(nil), p.replies...)
 	p.mu.Unlock()
 
-	if len(replies) != 1 || !strings.Contains(replies[0], "未知命令") {
+	if len(replies) != 1 || !strings.Contains(replies[0], "Unknown command") {
 		t.Fatalf("replies = %v", replies)
 	}
 }
@@ -500,7 +500,7 @@ func TestEngineEscCommand(t *testing.T) {
 	replies := append([]string(nil), p.replies...)
 	p.mu.Unlock()
 
-	if len(replies) != 1 || !strings.Contains(replies[0], "已中断") {
+	if len(replies) != 1 || !strings.Contains(replies[0], "cancelled") {
 		t.Fatalf("replies = %v", replies)
 	}
 }
@@ -638,7 +638,7 @@ func TestEnginePCommandShowsStatus(t *testing.T) {
 		t.Fatalf("got %d replies, want 2", len(replies))
 	}
 	pReply := replies[1]
-	if !strings.Contains(pReply, "状态:") {
+	if !strings.Contains(pReply, "Status:") {
 		t.Fatalf("/p reply missing status: %q", pReply)
 	}
 	if !strings.Contains(pReply, "Tokens:") {
@@ -694,7 +694,7 @@ func TestEngineNewCommand(t *testing.T) {
 	if len(replies) != 2 {
 		t.Fatalf("got %d replies, want 2", len(replies))
 	}
-	if !strings.Contains(replies[1], "已新建会话") {
+	if !strings.Contains(replies[1], "New session created") {
 		t.Fatalf("new reply = %q", replies[1])
 	}
 }
@@ -736,7 +736,7 @@ func TestEngineProjCommand(t *testing.T) {
 	replies := append([]string(nil), p.replies...)
 	p.mu.Unlock()
 
-	if len(replies) != 1 || !strings.Contains(replies[0], "已切换 project") {
+	if len(replies) != 1 || !strings.Contains(replies[0], "Switched project") {
 		t.Fatalf("replies = %v", replies)
 	}
 }

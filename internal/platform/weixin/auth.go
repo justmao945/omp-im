@@ -129,9 +129,9 @@ func performQRLogin(ctx context.Context, client *apiClient, stateDir string) (*s
 	}
 
 	fmt.Printf("\n=================================================\n")
-	fmt.Printf("请用微信扫描下方二维码登录：\n")
-	fmt.Printf("备用链接: %s\n", qrUrl)
-	fmt.Printf("图片文件: %s\n", qrFile)
+	fmt.Printf("Please scan the QR code below with WeChat to log in:\n")
+	fmt.Printf("Backup link: %s\n", qrUrl)
+	fmt.Printf("Image file: %s\n", qrFile)
 	fmt.Printf("=================================================\n\n")
 
 	qr, err := qrcode.New(qrUrl, qrcode.Low)

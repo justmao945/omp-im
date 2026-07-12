@@ -426,7 +426,7 @@ func (p *Platform) dispatchInbound(ctx context.Context, m *weixinMessage, h core
 		return
 	}
 	if strings.TrimSpace(body) == "" && len(images) > 0 {
-		body = "[图片]"
+		body = "[image]"
 	}
 
 	if tok := strings.TrimSpace(m.ContextToken); tok != "" {

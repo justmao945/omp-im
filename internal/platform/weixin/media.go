@@ -83,15 +83,15 @@ func mediaFallbackNotice(items []messageItem) string {
 	for _, it := range items {
 		switch it.Type {
 		case messageItemImage:
-			return "[图片未能下载，请检查 cdn_base_url 和加密密钥配置。]"
+			return "[Image download failed; please check cdn_base_url and encryption key config.]"
 		case messageItemVoice:
 			if it.VoiceItem == nil || strings.TrimSpace(it.VoiceItem.Text) == "" {
-				return "[语音消息未能处理。]"
+				return "[Voice message could not be processed.]"
 			}
 		case messageItemFile:
-			return "[文件未能下载。]"
+			return "[File download failed.]"
 		case messageItemVideo:
-			return "[视频未能下载。]"
+			return "[Video download failed.]"
 		}
 	}
 	return ""
