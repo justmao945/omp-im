@@ -15,20 +15,21 @@ Send these as messages in any supported IM conversation.
 
 ## Status output (`/p`)
 
-Example:
+`/p` replies with a markdown list. Example:
 
-```
-Agent: omp
-Project: default
-Model: kimi-code/kimi-for-coding
-Reasoning effort: auto
-Status: idle
-Elapsed: 45s
-Context: 8% / 262K
-Tools used: 2
-Current tool: 12s
-Command: mkdir -p caopan && ...
-Tokens: 1234 / 567
+```markdown
+## Status
+
+- **Agent:** omp
+- **Project:** default
+- **Model:** kimi-code/kimi-for-coding
+- **Reasoning effort:** auto
+- **Elapsed:** 45s
+- **Context:** 8% / 262K
+- **Tools used:** 2
+- **Current tool:** 12s
+- **Command:** `mkdir -p caopan && ...`
+- **Tokens:** 1234 / 567
 ```
 
 - `Model` and `Reasoning effort` show the active model configuration from the agent.
