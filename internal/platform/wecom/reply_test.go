@@ -81,7 +81,7 @@ func TestBuildStreamContent(t *testing.T) {
 			setup: func(rc *replyContext) {
 				rc.thinkingText = "analyzing"
 			},
-			wantContains:   []string{"analyzing"},
+			wantContains:   []string{"> analyzing"},
 			wantNotContain: "Thinking...",
 		},
 		{
@@ -118,7 +118,30 @@ func TestBuildStreamContent(t *testing.T) {
 					start: time.Now().Add(-2 * time.Second),
 				}}
 			},
-			wantContains: []string{"ls", "2s", "path"},
+			wantContains: []string{"> 🔧 ls", "> path"},
+		},
+		{
+			name:     "detailed thinking preserved with body",
+			thinking: "detailed",
+			setup: func(rc *replyContext) {
+				rc.thinkingText = "analyzing"
+				rc.streamText = "body text"
+			},
+			wantContains:   []string{"body text", "> analyzing"},
+			wantNotContain: "Thinking...",
+		},
+		{
+			name: "detailed tool preserved with body",
+			tool: "detailed",
+			setup: func(rc *replyContext) {
+				rc.toolName = "ls"
+				rc.toolHistory = []toolRecord{{
+					name:  "ls",
+					input: "{\"path\":\"/tmp\"}",
+				}}
+				rc.streamText = "body text"
+			},
+			wantContains: []string{"body text", "> 🔧 ls", "> path=/tmp"},
 		},
 		{
 			name: "tool off",

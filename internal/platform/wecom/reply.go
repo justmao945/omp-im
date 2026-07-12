@@ -242,15 +242,54 @@ func (p *Platform) renderStream(ctx context.Context, rc *replyContext, finished 
 	return nil
 }
 
+// quoteText prefixes every line of text with a markdown blockquote marker.
+func quoteText(text string) string {
+	if text == "" {
+		return ""
+	}
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = "> " + line
+	}
+	return strings.Join(lines, "\n")
+}
+
 // buildStreamContent assembles the visible text with optional status line and footer.
-// Once the body text starts, the status line is hidden and replaced by the body.
+// In concise mode, the status line is shown while no body text has arrived, then
+// replaced by the body. In detailed mode, thinking and tool output are preserved
+// as quote blocks after the body text so they are never overwritten.
 func buildStreamContent(rc *replyContext, thinkingDisplay, toolDisplay string, finished bool) string {
 	var parts []string
 
+	// Body text always comes first.
+	if rc.streamText != "" {
+		parts = append(parts, rc.streamText)
+	}
+
+	// In detailed mode, preserve thinking and tool output as quote blocks. They
+	// remain visible as the body text grows, unlike the concise status line.
+	if thinkingDisplay == "detailed" && rc.thinkingText != "" {
+		parts = append(parts, quoteText(rc.thinkingText))
+	}
+
+	if toolDisplay == "detailed" && rc.toolName != "" {
+		var toolLines []string
+		toolLines = append(toolLines, fmt.Sprintf("> 🔧 %s", rc.toolName))
+		if rc.toolHistory != nil {
+			if n := len(rc.toolHistory); n > 0 {
+				if preview := formatToolInputOneLine(rc.toolHistory[n-1].input); preview != "" {
+					toolLines = append(toolLines, "> "+preview)
+				}
+			}
+		}
+		parts = append(parts, strings.Join(toolLines, "\n"))
+	}
+
+	// While the body text is empty, show a concise status line for concise-mode
+	// parts or a generic working indicator when no detailed content is ready yet.
 	if rc.streamText == "" {
-		// Status line: only shown while no body text has arrived yet.
 		switch {
-		case rc.toolName != "" && toolDisplay != "off":
+		case rc.toolName != "" && toolDisplay != "off" && toolDisplay != "detailed":
 			elapsed := ""
 			if !rc.toolStart.IsZero() {
 				elapsed = fmt.Sprintf(" %s", formatDuration(time.Since(rc.toolStart)))
@@ -258,34 +297,22 @@ func buildStreamContent(rc *replyContext, thinkingDisplay, toolDisplay string, f
 			line := fmt.Sprintf("🔧 %s", rc.toolName)
 			if rc.toolHistory != nil {
 				if n := len(rc.toolHistory); n > 0 {
-					if toolDisplay == "detailed" {
-						if preview := truncateText(rc.toolHistory[n-1].input, 300); preview != "" {
-							line += "\n```\n" + preview + "\n```"
-						}
-					} else if preview := formatToolInputOneLine(rc.toolHistory[n-1].input); preview != "" {
+					if preview := formatToolInputOneLine(rc.toolHistory[n-1].input); preview != "" {
 						line += ": " + preview
 					}
 				}
 			}
 			line += elapsed
 			parts = append(parts, line)
-		case rc.thinkingText != "" && thinkingDisplay != "off":
-			if thinkingDisplay == "detailed" {
-				parts = append(parts, rc.thinkingText)
-			} else {
-				elapsed := ""
-				if !rc.turnStart.IsZero() {
-					elapsed = fmt.Sprintf(" %s", formatDuration(time.Since(rc.turnStart)))
-				}
-				parts = append(parts, fmt.Sprintf("🤔 Thinking...%s", elapsed))
+		case rc.thinkingText != "" && thinkingDisplay != "off" && thinkingDisplay != "detailed":
+			elapsed := ""
+			if !rc.turnStart.IsZero() {
+				elapsed = fmt.Sprintf(" %s", formatDuration(time.Since(rc.turnStart)))
 			}
-		case !rc.turnStart.IsZero():
-			// No thinking or tool yet: show that the turn is in progress.
+			parts = append(parts, fmt.Sprintf("🤔 Thinking...%s", elapsed))
+		case !rc.turnStart.IsZero() && len(parts) == 0:
 			parts = append(parts, fmt.Sprintf("⚙️ Working... %s", formatDuration(time.Since(rc.turnStart))))
 		}
-	} else {
-		// Body text has arrived; show it instead of the status line.
-		parts = append(parts, rc.streamText)
 	}
 
 	// Footer at the end of the turn.
