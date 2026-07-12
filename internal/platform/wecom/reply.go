@@ -2,8 +2,10 @@ package wecom
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -256,12 +258,12 @@ func buildStreamContent(rc *replyContext, thinkingDisplay, toolDisplay string, f
 			line := fmt.Sprintf("🔧 %s%s", rc.toolName, elapsed)
 			if rc.toolHistory != nil {
 				if n := len(rc.toolHistory); n > 0 {
-					maxPreview := 120
 					if toolDisplay == "detailed" {
-						maxPreview = 300
-					}
-					if preview := truncateText(rc.toolHistory[n-1].input, maxPreview); preview != "" {
-						line += "\n```\n" + preview + "\n```"
+						if preview := truncateText(rc.toolHistory[n-1].input, 300); preview != "" {
+							line += "\n```\n" + preview + "\n```"
+						}
+					} else if preview := formatToolInputOneLine(rc.toolHistory[n-1].input); preview != "" {
+						line += ": " + preview
 					}
 				}
 			}
@@ -350,6 +352,58 @@ func buildToolDetails(rc *replyContext) string {
 		parts = append(parts, line)
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// formatToolInputOneLine parses a tool-call input JSON and returns a compact,
+// single-line representation like "key=value key2=value2" or "cmd arg1 arg2".
+// Non-JSON values are returned as their first line.
+func formatToolInputOneLine(input string) string {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return ""
+	}
+	if obj, ok := parseToolInputJSON(input); ok {
+		// Special-case command-line tools: show "cmd arg1 arg2".
+		if cmd, ok := obj["command"].(string); ok && cmd != "" {
+			var args []string
+			if arr, ok := obj["args"].([]any); ok {
+				for _, a := range arr {
+					if s, ok := a.(string); ok {
+						args = append(args, s)
+					}
+				}
+			}
+			if len(args) > 0 {
+				return cmd + " " + strings.Join(args, " ")
+			}
+			return cmd
+		}
+		var keys []string
+		for k := range obj {
+			keys = append(keys, k)
+		}
+		if len(keys) == 0 {
+			return ""
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, k := range keys {
+			parts = append(parts, fmt.Sprintf("%s=%v", k, obj[k]))
+		}
+		return strings.Join(parts, " ")
+	}
+	if i := strings.IndexByte(input, '\n'); i != -1 {
+		return input[:i]
+	}
+	return input
+}
+
+func parseToolInputJSON(input string) (map[string]any, bool) {
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(input), &obj); err != nil {
+		return nil, false
+	}
+	return obj, true
 }
 
 // truncateText returns a prefix of text up to max runes, appending "..." if truncated.

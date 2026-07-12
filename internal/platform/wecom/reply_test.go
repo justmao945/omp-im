@@ -98,8 +98,13 @@ func TestBuildStreamContent(t *testing.T) {
 			setup: func(rc *replyContext) {
 				rc.toolName = "git status"
 				rc.toolStart = time.Now().Add(-2 * time.Second)
+				rc.toolHistory = []toolRecord{{
+					name:  "git status",
+					input: "{\"path\":\"/tmp\"}",
+					start: time.Now().Add(-2 * time.Second),
+				}}
 			},
-			wantContains: []string{"git status", "2s"},
+			wantContains: []string{"git status", "2s", "path=/tmp"},
 		},
 		{
 			name: "tool running detailed",
