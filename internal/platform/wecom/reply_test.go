@@ -237,7 +237,33 @@ func TestBuildStreamContent(t *testing.T) {
 					end:    time.Now().Add(-2 * time.Second),
 				}}
 			},
-			wantContains:   []string{"result", "⏱️ 10s"},
+			wantContains:   []string{"result", "⏱️ 10s", "🛠️ 1 tools"},
+			wantNotContain: "root:x",
+		},
+		{
+			name:     "detailed tool result hidden",
+			thinking: "off",
+			tool:     "detailed",
+			finished: true,
+			setup: func(rc *replyContext) {
+				rc.turnStart = time.Now().Add(-10 * time.Second)
+				rc.toolCount = 1
+				rc.toolTotalDuration = 3 * time.Second
+				rc.turnEnd = time.Now()
+				rc.streamText = "result"
+				rc.streamBody = []streamSection{
+					{kind: "text", text: "result"},
+					{kind: "tool", text: "🔧 cat\npath=/etc/passwd"},
+				}
+				rc.toolHistory = []toolRecord{{
+					name:   "cat",
+					input:  "{\"path\":\"/etc/passwd\"}",
+					output: "root:x:0:0",
+					start:  time.Now().Add(-5 * time.Second),
+					end:    time.Now().Add(-2 * time.Second),
+				}}
+			},
+			wantContains:   []string{"result", "🔧 cat", "path=/etc/passwd"},
 			wantNotContain: "root:x",
 		},
 	}

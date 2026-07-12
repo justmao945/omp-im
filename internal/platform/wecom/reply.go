@@ -184,15 +184,7 @@ func (p *Platform) StreamEvent(ctx context.Context, replyCtx any, ev core.Stream
 			rc.toolHistory[n-1].output = ev.ToolOutput
 			rc.toolHistory[n-1].end = time.Now()
 		}
-		// Append output to the last tool section if output is available.
-		for i := len(rc.streamBody) - 1; i >= 0; i-- {
-			if rc.streamBody[i].kind == "tool" {
-				if ev.ToolOutput != "" {
-					rc.streamBody[i].text += "\n" + ev.ToolOutput
-				}
-				break
-			}
-		}
+		// Detailed mode shows only the call (name + input), not the result.
 	}
 
 	return p.renderStream(ctx, rc, false)
@@ -394,6 +386,9 @@ func buildStreamFooter(rc *replyContext, thinkingDisplay, toolDisplay string) st
 	if rc.contextSize > 0 {
 		pct := rc.contextUsed * 100 / rc.contextSize
 		items = append(items, fmt.Sprintf("🧠 %d%%", pct))
+	}
+	if (thinkingDisplay == "detailed" || toolDisplay == "detailed") && rc.toolCount > 0 {
+		items = append(items, fmt.Sprintf("🛠️ %d tools", rc.toolCount))
 	}
 	return strings.Join(items, " · ")
 }
