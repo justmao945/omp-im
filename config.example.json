@@ -23,7 +23,9 @@
         "bot_id": "YOUR_BOT_ID",
         "secret": "YOUR_BOT_SECRET",
         "allow_from": "*",
-        "group_allow_from": "*"
+        "group_allow_from": "*",
+        "thinking_display": "detailed",
+        "tool_display": "detailed"
       }
     }
   ]

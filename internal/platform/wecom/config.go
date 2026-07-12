@@ -33,7 +33,7 @@ func parseConfig(opts map[string]any) (*config, error) {
 	thinkingDisplay, _ := opts["thinking_display"].(string)
 	thinkingDisplay = strings.ToLower(strings.TrimSpace(thinkingDisplay))
 	if thinkingDisplay == "" {
-		thinkingDisplay = "concise"
+		thinkingDisplay = "detailed"
 	}
 	switch thinkingDisplay {
 	case "concise", "detailed", "off":
@@ -44,7 +44,7 @@ func parseConfig(opts map[string]any) (*config, error) {
 	toolDisplay, _ := opts["tool_display"].(string)
 	toolDisplay = strings.ToLower(strings.TrimSpace(toolDisplay))
 	if toolDisplay == "" {
-		toolDisplay = "concise"
+		toolDisplay = "detailed"
 	}
 	switch toolDisplay {
 	case "concise", "detailed", "off":
