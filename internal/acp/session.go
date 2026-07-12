@@ -65,9 +65,9 @@ type configOption struct {
 	CurrentValue any    `json:"currentValue"`
 }
 
-func extractModel(opts []configOption) string {
+func extractConfigOptionValue(opts []configOption, category string) string {
 	for _, opt := range opts {
-		if opt.Category == "model" || opt.ID == "model" {
+		if opt.Category == category || opt.ID == category {
 			if s, ok := opt.CurrentValue.(string); ok {
 				return s
 			}
@@ -77,11 +77,17 @@ func extractModel(opts []configOption) string {
 }
 
 func (s *Session) setModelFromConfigOptions(opts []configOption) {
-	if m := extractModel(opts); m != "" {
+	if m := extractConfigOptionValue(opts, "model"); m != "" {
 		s.statusMu.Lock()
 		s.agentStatus.Model = m
 		s.statusMu.Unlock()
 		slog.Info("acp: model detected", "session", s.sessionKey, "model", m)
+	}
+	if r := extractConfigOptionValue(opts, "thought_level"); r != "" {
+		s.statusMu.Lock()
+		s.agentStatus.ReasoningEffort = r
+		s.statusMu.Unlock()
+		slog.Info("acp: thought_level detected", "session", s.sessionKey, "thought_level", r)
 	}
 }
 
@@ -99,6 +105,38 @@ func extractConfigOptionUpdate(params json.RawMessage) []configOption {
 		return nil
 	}
 	return wrap.Update.ConfigOptions
+}
+
+type usageUpdate struct {
+	Used int `json:"used"`
+	Size int `json:"size"`
+}
+
+func extractUsageUpdate(params json.RawMessage) (used, size int) {
+	var wrap struct {
+		Update struct {
+			SessionUpdate string `json:"sessionUpdate"`
+			Used          int    `json:"used"`
+			Size          int    `json:"size"`
+		} `json:"update"`
+	}
+	if err := json.Unmarshal(params, &wrap); err != nil {
+		return 0, 0
+	}
+	if wrap.Update.SessionUpdate != "usage_update" {
+		return 0, 0
+	}
+	return wrap.Update.Used, wrap.Update.Size
+}
+
+func (s *Session) setUsageUpdate(used, size int) {
+	if size <= 0 {
+		return
+	}
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+	s.agentStatus.ContextUsed = used
+	s.agentStatus.ContextSize = size
 }
 
 // promptResult is returned by session/prompt.
@@ -312,6 +350,9 @@ func (s *Session) Respond(ctx context.Context, prompt string, images []core.Imag
 			if opts := extractConfigOptionUpdate(params); len(opts) > 0 {
 				s.setModelFromConfigOptions(opts)
 			}
+			if used, size := extractUsageUpdate(params); size > 0 {
+				s.setUsageUpdate(used, size)
+			}
 			if hasToolCall(params) {
 				cmd := ""
 				if toolCallKind(params) == "execute" {
@@ -436,9 +477,9 @@ func (s *Session) History() []core.HistoryEntry {
 func (s *Session) resetStatus() {
 	s.statusMu.Lock()
 	defer s.statusMu.Unlock()
-	model := s.agentStatus.Model
+	snap := snapshotStatus(s.agentStatus)
 	s.agentStatus = core.AgentStatus{State: "idle"}
-	s.agentStatus.Model = model
+	restoreStatus(&s.agentStatus, snap)
 	s.turnStart = time.Time{}
 	s.toolCount = 0
 	s.currentTool = time.Time{}
@@ -448,13 +489,37 @@ func (s *Session) resetStatus() {
 func (s *Session) startTurnStatus() {
 	s.statusMu.Lock()
 	defer s.statusMu.Unlock()
-	model := s.agentStatus.Model
+	snap := snapshotStatus(s.agentStatus)
 	s.agentStatus = core.AgentStatus{State: "thinking"}
-	s.agentStatus.Model = model
+	restoreStatus(&s.agentStatus, snap)
 	s.turnStart = time.Now()
 	s.toolCount = 0
 	s.currentTool = time.Time{}
 	s.agentStatus.CurrentToolCommand = ""
+}
+
+// statusSnapshot holds session-level fields that survive turn resets.
+type statusSnapshot struct {
+	model           string
+	reasoningEffort string
+	contextUsed     int
+	contextSize     int
+}
+
+func snapshotStatus(st core.AgentStatus) statusSnapshot {
+	return statusSnapshot{
+		model:           st.Model,
+		reasoningEffort: st.ReasoningEffort,
+		contextUsed:     st.ContextUsed,
+		contextSize:     st.ContextSize,
+	}
+}
+
+func restoreStatus(st *core.AgentStatus, snap statusSnapshot) {
+	st.Model = snap.model
+	st.ReasoningEffort = snap.reasoningEffort
+	st.ContextUsed = snap.contextUsed
+	st.ContextSize = snap.contextSize
 }
 
 func (s *Session) setToolStatus(active bool, command string) {

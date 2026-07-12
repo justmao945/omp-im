@@ -54,6 +54,8 @@ type AgentStatus struct {
 	OutputTokens        int
 	Model               string
 	ReasoningEffort     string
+	ContextUsed         int
+	ContextSize         int
 }
 
 // AgentSession is a single running conversation with an agent.

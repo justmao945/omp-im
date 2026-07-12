@@ -15,7 +15,7 @@ func TestExtractModelFromConfigOptions(t *testing.T) {
 		{ID: "model", Name: "Model", Category: "model", Type: "select", CurrentValue: "claude-4-20250514"},
 		{ID: "thought_level", Name: "Thinking", Category: "thought_level", Type: "select", CurrentValue: "high"},
 	}
-	if got := extractModel(opts); got != "claude-4-20250514" {
+	if got := extractConfigOptionValue(opts, "model"); got != "claude-4-20250514" {
 		t.Fatalf("extractModel = %q, want claude-4-20250514", got)
 	}
 }
@@ -26,7 +26,7 @@ func TestExtractConfigOptionUpdate(t *testing.T) {
 	if len(opts) != 1 {
 		t.Fatalf("got %d options, want 1", len(opts))
 	}
-	if got := extractModel(opts); got != "gpt-5" {
+	if got := extractConfigOptionValue(opts, "model"); got != "gpt-5" {
 		t.Fatalf("model = %q, want gpt-5", got)
 	}
 }
@@ -94,6 +94,56 @@ func TestModelDetectedOnRealSession(t *testing.T) {
 		t.Fatalf("model not detected; status = %+v", st)
 	}
 }
+
+func TestExtractUsageUpdate(t *testing.T) {
+	params := []byte(`{"update":{"sessionUpdate":"usage_update","used":53000,"size":200000}}`)
+	used, size := extractUsageUpdate(params)
+	if used != 53000 || size != 200000 {
+		t.Fatalf("usage update = %d/%d, want 53000/200000", used, size)
+	}
+}
+
+func TestExtractUsageUpdateIgnoresOtherUpdates(t *testing.T) {
+	params := []byte(`{"update":{"sessionUpdate":"text_update","text":"hello"}}`)
+	used, size := extractUsageUpdate(params)
+	if used != 0 || size != 0 {
+		t.Fatalf("usage update = %d/%d, want 0/0", used, size)
+	}
+}
+
+func TestSetModelFromConfigOptionsExtractsThoughtLevel(t *testing.T) {
+	s := &Session{agentStatus: core.AgentStatus{State: "idle"}}
+	opts := []configOption{
+		{ID: "model", Category: "model", CurrentValue: "gpt-5"},
+		{ID: "thought_level", Category: "thought_level", CurrentValue: "high"},
+	}
+	s.setModelFromConfigOptions(opts)
+	if s.agentStatus.Model != "gpt-5" {
+		t.Fatalf("model = %q, want gpt-5", s.agentStatus.Model)
+	}
+	if s.agentStatus.ReasoningEffort != "high" {
+		t.Fatalf("reasoning effort = %q, want high", s.agentStatus.ReasoningEffort)
+	}
+}
+
+func TestStatusSnapshotPreservesSessionFields(t *testing.T) {
+	s := &Session{agentStatus: core.AgentStatus{
+		State:           "idle",
+		Model:           "m",
+		ReasoningEffort: "high",
+		ContextUsed:     100,
+		ContextSize:     200,
+	}}
+	s.startTurnStatus()
+	if s.agentStatus.Model != "m" || s.agentStatus.ReasoningEffort != "high" || s.agentStatus.ContextUsed != 100 || s.agentStatus.ContextSize != 200 {
+		t.Fatalf("startTurnStatus dropped session fields: %+v", s.agentStatus)
+	}
+	s.resetStatus()
+	if s.agentStatus.Model != "m" || s.agentStatus.ReasoningEffort != "high" || s.agentStatus.ContextUsed != 100 || s.agentStatus.ContextSize != 200 {
+		t.Fatalf("resetStatus dropped session fields: %+v", s.agentStatus)
+	}
+}
+
 
 
 

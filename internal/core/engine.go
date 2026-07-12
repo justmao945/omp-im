@@ -552,6 +552,10 @@ func (e *Engine) handlePCommand(ctx context.Context, p Platform, msg *Message) {
 	if st.ReasoningEffort != "" {
 		lines = append(lines, fmt.Sprintf("Reasoning effort: %s", st.ReasoningEffort))
 	}
+	if st.ContextSize > 0 {
+		pct := float64(st.ContextUsed) / float64(st.ContextSize) * 100
+		lines = append(lines, fmt.Sprintf("Context: %d / %d (%.0f%%)", st.ContextUsed, st.ContextSize, pct))
+	}
 
 	_ = p.Reply(ctx, msg.ReplyCtx, strings.Join(lines, "\n"))
 }
