@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -102,8 +104,6 @@ func hasUsableSession(path string) bool {
 // performQRLogin fetches a QR code, saves it as a PNG file, polls for scan
 // confirmation, and persists the resulting session token.
 func performQRLogin(ctx context.Context, client *apiClient, stateDir string) (*sessionState, error) {
-	statePath := filepath.Join(stateDir, defaultSessionFile)
-
 	qrResp, err := client.fetchLoginQRCode(ctx, defaultBotType)
 	if err != nil {
 		return nil, fmt.Errorf("weixin: fetch QR code: %w", err)
@@ -114,14 +114,19 @@ func performQRLogin(ctx context.Context, client *apiClient, stateDir string) (*s
 
 	qrFile := filepath.Join(stateDir, defaultQRFileName)
 	if err := saveQRCodeImage(qrFile, qrResp.QRCodeImgContent); err != nil {
-		slog.Warn("weixin: failed to save QR code image", "error", err)
-	} else {
-		slog.Info("weixin: QR code saved", "path", qrFile)
+		return nil, fmt.Errorf("weixin: failed to save QR code image: %w", err)
 	}
-
-	fmt.Printf("\n请用微信扫描以下二维码登录：\n")
+	fmt.Printf("\n=================================================\n")
+	fmt.Printf("请用微信扫描以下二维码登录：\n")
 	fmt.Printf("  图片: %s\n", qrFile)
-	fmt.Printf("  内容: %s\n\n", qrResp.QRCode)
+	fmt.Printf("  内容: %s\n", qrResp.QRCode)
+	fmt.Printf("=================================================\n\n")
+
+	if opened := tryOpenImage(qrFile); opened {
+		fmt.Println("已尝试自动打开二维码图片。")
+	} else {
+		fmt.Println("请手动打开上面的图片文件，用微信扫描。")
+	}
 
 	slog.Info("weixin: waiting for QR code scan", "deadline", qrLoginDeadline)
 
@@ -136,9 +141,6 @@ func performQRLogin(ctx context.Context, client *apiClient, stateDir string) (*s
 		UserID:   status.ILinkUserID,
 		BaseURL:  normalizeBaseURL(status.BaseURL),
 		Peers:    make(map[string]sessionPeer),
-	}
-	if err := saveSessionState(statePath, state); err != nil {
-		return nil, fmt.Errorf("weixin: save session: %w", err)
 	}
 	slog.Info("weixin: login successful", "bot_id", state.BotID, "user_id", state.UserID)
 	return state, nil
@@ -205,6 +207,35 @@ func normalizeBaseURL(baseURL string) string {
 		return defaultBaseURL
 	}
 	return strings.TrimRight(baseURL, "/")
+}
+
+// tryOpenImage attempts to open the QR image with the system's default image viewer.
+func tryOpenImage(path string) bool {
+	var cmd string
+	var args []string
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = "open"
+		args = []string{path}
+	case "linux":
+		cmd = "xdg-open"
+		args = []string{path}
+	case "windows":
+		cmd = "cmd"
+		args = []string{"/c", "start", path}
+	default:
+		return false
+	}
+	if _, err := exec.LookPath(cmd); err != nil {
+		return false
+	}
+	c := exec.Command(cmd, args...)
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	if err := c.Start(); err != nil {
+		return false
+	}
+	return true
 }
 
 // isTimeoutError treats HTTP context deadlines as normal long-poll timeouts.

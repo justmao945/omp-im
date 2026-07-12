@@ -54,11 +54,31 @@ All working data is stored under `~/.omp-im`.
 
 ### QR-code login (recommended)
 
-Leave `platforms[0].options.token` empty. On first start, a QR code is saved to `~/.omp-im/weixin/default/login-qr.png` and its content is printed in the terminal. Scan the code with WeChat, confirm on your phone, and the login token is persisted to `~/.omp-im/weixin/default/session.json`. Subsequent restarts reuse the saved session automatically.
+Leave `platforms[0].options.token` empty and run the login subcommand:
+
+```bash
+omp-im weixin login
+```
+
+This fetches a QR code from iLink, saves it to `~/.omp-im/weixin/default/login-qr.png`, prints the image path in the terminal, and tries to open it with the default image viewer. Scan the code with WeChat, confirm on your phone, and the login token is persisted to `~/.omp-im/weixin/default/session.json`. After that, start the server normally:
+
+```bash
+omp-im
+```
+
+Subsequent restarts reuse the saved session automatically.
 
 ### Token login
 
 If you already have an iLink bot Bearer token, set `platforms[0].options.token` and the platform skips QR login.
+
+### Logout
+
+To remove the saved Weixin session and force re-login:
+
+```bash
+omp-im weixin logout
+```
 
 ### Access control
 

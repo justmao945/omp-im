@@ -79,6 +79,9 @@ func sanitizePathSegment(s string) string {
 }
 
 func defaultDataDir() string {
+	if d := os.Getenv("OMP_IM_DATA_DIR"); d != "" {
+		return d
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return filepath.Join(".", ".omp-im")
@@ -88,9 +91,9 @@ func defaultDataDir() string {
 
 // New constructs a Weixin platform.
 // If options.token is provided, it is used directly. Otherwise the platform loads
-// a saved session from ~/.omp-im/weixin/<account>/session.json or prompts for
-// QR-code login.
-// Optional: base_url, allow_from, route_tag, account_id, proxy.
+// a saved session from ~/.omp-im/weixin/<account>/session.json. If no session
+// exists, New returns an error and instructs the user to run `weixin login`.
+// Optional: base_url, allow_from, route_tag, account_id, proxy, token.
 func New(opts map[string]any) (*Platform, error) {
 	token, _ := opts["token"].(string)
 	allowFrom, _ := opts["allow_from"].(string)
@@ -145,22 +148,74 @@ func New(opts map[string]any) (*Platform, error) {
 	if strings.TrimSpace(token) != "" {
 		p.api.setToken(token)
 		p.session = &sessionState{BotToken: token, BaseURL: normalizeBaseURL(baseURL), Peers: make(map[string]sessionPeer)}
-	} else {
-		state, err := p.loadSession()
-		if err != nil {
-			state, err = performQRLogin(context.Background(), p.api, stateDir)
-			if err != nil {
-				return nil, err
-			}
-		}
-		p.session = state
-		p.api.setToken(state.BotToken)
-		if state.BaseURL != "" {
-			p.api.baseURL = normalizeBaseURL(state.BaseURL) + "/"
-		}
+		return p, nil
+	}
+
+	state, err := p.loadSession()
+	if err != nil {
+		return nil, fmt.Errorf("weixin: no saved session in %s; run `weixin login` first", p.sessionPath)
+	}
+	p.session = state
+	p.api.setToken(state.BotToken)
+	if state.BaseURL != "" {
+		p.api.baseURL = normalizeBaseURL(state.BaseURL) + "/"
 	}
 
 	return p, nil
+}
+
+// Login performs QR-code login for Weixin and persists the session to disk.
+// Optional: base_url, route_tag, account_id, proxy.
+func Login(ctx context.Context, opts map[string]any) error {
+	baseURL, _ := opts["base_url"].(string)
+	routeTag, _ := opts["route_tag"].(string)
+	accountLabel, _ := opts["account_id"].(string)
+	if accountLabel == "" {
+		accountLabel = "default"
+	}
+	stateDir := filepath.Join(defaultDataDir(), "weixin", sanitizePathSegment(accountLabel))
+
+	httpClient := &http.Client{Timeout: defaultAPITimeout}
+	if proxyURL, _ := opts["proxy"].(string); proxyURL != "" {
+		u, err := url.Parse(proxyURL)
+		if err != nil {
+			return fmt.Errorf("weixin: invalid proxy URL %q: %w", proxyURL, err)
+		}
+		httpClient.Transport = &http.Transport{Proxy: http.ProxyURL(u)}
+		slog.Info("weixin: using proxy", "proxy", u.Redacted())
+	}
+
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		return fmt.Errorf("weixin: create state dir: %w", err)
+	}
+
+	api := newAPIClient(baseURL, "", routeTag, httpClient)
+	state, err := performQRLogin(ctx, api, stateDir)
+	if err != nil {
+		return err
+	}
+
+	statePath := filepath.Join(stateDir, defaultSessionFile)
+	if err := saveSessionState(statePath, state); err != nil {
+		return fmt.Errorf("weixin: save session: %w", err)
+	}
+	slog.Info("weixin: session saved", "path", statePath)
+	return nil
+}
+
+// Logout removes the saved Weixin session for the given account.
+func Logout(opts map[string]any) error {
+	accountLabel, _ := opts["account_id"].(string)
+	if accountLabel == "" {
+		accountLabel = "default"
+	}
+	stateDir := filepath.Join(defaultDataDir(), "weixin", sanitizePathSegment(accountLabel))
+	statePath := filepath.Join(stateDir, defaultSessionFile)
+	if err := os.Remove(statePath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("weixin: remove session: %w", err)
+	}
+	slog.Info("weixin: logged out", "account", accountLabel)
+	return nil
 }
 
 func (p *Platform) Name() string { return "weixin" }

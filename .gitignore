@@ -1,5 +1,5 @@
 # Binaries
-omp-im
+/omp-im
 *.exe
 
 # Data

@@ -14,6 +14,8 @@ import (
 )
 
 func TestPlatformPollsAndSendsText(t *testing.T) {
+	t.Setenv("OMP_IM_DATA_DIR", t.TempDir())
+
 	var mu sync.Mutex
 	updatesReqCount := 0
 	sentMessages := []sendMessageReq{}
