@@ -253,9 +253,9 @@ func buildStreamContent(rc *replyContext, thinkingDisplay, toolDisplay string, f
 		case rc.toolName != "" && toolDisplay != "off":
 			elapsed := ""
 			if !rc.toolStart.IsZero() {
-				elapsed = fmt.Sprintf(" %s", formatDuration(time.Since(rc.toolStart)))
+				elapsed = fmt.Sprintf("[%s] ", formatDuration(time.Since(rc.toolStart)))
 			}
-			line := fmt.Sprintf("🔧 %s%s", rc.toolName, elapsed)
+			line := fmt.Sprintf("%s🔧 %s", elapsed, rc.toolName)
 			if rc.toolHistory != nil {
 				if n := len(rc.toolHistory); n > 0 {
 					if toolDisplay == "detailed" {
@@ -274,13 +274,13 @@ func buildStreamContent(rc *replyContext, thinkingDisplay, toolDisplay string, f
 			} else {
 				elapsed := ""
 				if !rc.turnStart.IsZero() {
-					elapsed = fmt.Sprintf(" %s", formatDuration(time.Since(rc.turnStart)))
+					elapsed = fmt.Sprintf("[%s] ", formatDuration(time.Since(rc.turnStart)))
 				}
-				parts = append(parts, fmt.Sprintf("🤔 Thinking... %s", elapsed))
+				parts = append(parts, fmt.Sprintf("%s🤔 Thinking...", elapsed))
 			}
 		case !rc.turnStart.IsZero():
 			// No thinking or tool yet: show that the turn is in progress.
-			parts = append(parts, fmt.Sprintf("⚙️ Working... %s", formatDuration(time.Since(rc.turnStart))))
+			parts = append(parts, fmt.Sprintf("[%s] ⚙️ Working...", formatDuration(time.Since(rc.turnStart))))
 		}
 	} else {
 		// Body text has arrived; show it instead of the status line.
@@ -298,39 +298,18 @@ func buildStreamContent(rc *replyContext, thinkingDisplay, toolDisplay string, f
 }
 
 // buildStreamFooter builds the summary footer shown at the end of a turn.
-// Format: [⏱️ total] 🤔 thinking Xs · 🔧 N tools Ys · 🧠 context usage P%.
+// It only shows the total elapsed time: ⏱️ Xs.
 func buildStreamFooter(rc *replyContext, thinkingDisplay, toolDisplay string) string {
-	var items []string
-
-	hasThinking := thinkingDisplay != "off" && !rc.thinkingEnd.IsZero() && rc.thinkingEnd.After(rc.turnStart)
-	if hasThinking {
-		items = append(items, fmt.Sprintf("🤔 thinking %s", formatDuration(rc.thinkingEnd.Sub(rc.turnStart))))
-	}
-	hasTools := toolDisplay != "off" && rc.toolCount > 0
-	if hasTools {
-		items = append(items, fmt.Sprintf("🔧 %d tool%s %s", rc.toolCount, plural(rc.toolCount), formatDuration(rc.toolTotalDuration)))
-	}
-	if rc.contextSize > 0 {
-		pct := rc.contextUsed * 100 / rc.contextSize
-		items = append(items, fmt.Sprintf("🧠 context usage %d%%", pct))
-	}
-
-	if len(items) == 0 {
-		return ""
-	}
-
 	var total string
 	if !rc.turnEnd.IsZero() && rc.turnEnd.After(rc.turnStart) {
 		total = formatDuration(rc.turnEnd.Sub(rc.turnStart))
 	} else if !rc.turnStart.IsZero() {
 		total = formatDuration(time.Since(rc.turnStart))
 	}
-
-	prefix := ""
-	if total != "" {
-		prefix = fmt.Sprintf("[⏱️ %s] ", total)
+	if total == "" {
+		return ""
 	}
-	return prefix + strings.Join(items, " · ")
+	return fmt.Sprintf("⏱️ %s", total)
 }
 
 // buildToolDetails renders a detailed log of every tool call for the footer.

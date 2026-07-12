@@ -2,6 +2,7 @@ package wecom
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/justmao945/omp-im/internal/core"
@@ -148,8 +149,8 @@ func TestStreamReplyPassive(t *testing.T) {
 		t.Fatalf("first content = %q", first["content"])
 	}
 	last := sent[1]["body"].(map[string]interface{})["stream"].(map[string]interface{})
-	if last["content"] != "hello world" {
-		t.Fatalf("last content = %q", last["content"])
+	if !strings.Contains(last["content"].(string), "hello world") {
+		t.Fatalf("last content missing body: %q", last["content"])
 	}
 	if last["finish"] != true {
 		t.Fatal("expected finish=true on last chunk")
