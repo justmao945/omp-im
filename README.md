@@ -12,6 +12,17 @@ cp config.example.json ~/.omp-im/config.json
 go run ./cmd/omp-im
 ```
 
+Or build and install a binary:
+
+```bash
+make build
+make install        # installs to /usr/local/bin (may need sudo)
+# or
+make install-user   # installs to ~/.local/bin
+
+omp-im
+```
+
 All working data is stored under `~/.omp-im`.
 
 ## Architecture
