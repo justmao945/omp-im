@@ -517,9 +517,7 @@ func (e *Engine) handlePCommand(ctx context.Context, p Platform, msg *Message) {
 				prefix = "[A]"
 			}
 			content := h.Content
-			if len(content) > 60 {
-				content = content[:57] + "..."
-			}
+			content = truncate(content, 60)
 			lines = append(lines, fmt.Sprintf("%s %s", prefix, content))
 		}
 	} else {
@@ -558,10 +556,17 @@ func formatDuration(d time.Duration) string {
 }
 
 func truncate(s string, max int) string {
-	if len(s) <= max {
+	if max <= 0 {
 		return s
 	}
-	return s[:max] + "..."
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	if max <= 3 {
+		return string(runes[:max])
+	}
+	return string(runes[:max-3]) + "..."
 }
 
 func (e *Engine) sessionAgent(sessionKey string) string {
