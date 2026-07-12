@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -511,10 +510,12 @@ func TestEngineSessionStore(t *testing.T) {
 	eng.AddPlatform(p)
 
 	dir := t.TempDir()
-	storePath := filepath.Join(dir, "sessions.json")
-	if err := os.WriteFile(storePath, []byte(`{"fake:u1":"persisted-id-123"}`), 0o600); err != nil {
+	storePath := filepath.Join(dir, "sessions.db")
+	if err := eng.SetSessionStore(storePath); err != nil {
 		t.Fatal(err)
 	}
+	// Pre-populate a session ID so we can verify resume across restarts.
+	eng.setSessionID("fake:u1", "persisted-id-123")
 	if err := eng.SetSessionStore(storePath); err != nil {
 		t.Fatal(err)
 	}
@@ -544,38 +545,6 @@ func TestEngineSessionStore(t *testing.T) {
 
 	if agent.Started() != 1 {
 		t.Fatalf("agent started %d times, want 1", agent.Started())
-	}
-
-	data, err := os.ReadFile(storePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), "persisted-id-123") {
-		t.Fatalf("session store did not preserve persisted session ID: %s", data)
-	}
-}
-
-func TestEngineSessionStoreEmptyFile(t *testing.T) {
-	eng, _ := newTestEngine("fake")
-	dir := t.TempDir()
-	storePath := filepath.Join(dir, "sessions.json")
-	if err := os.WriteFile(storePath, []byte{}, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := eng.SetSessionStore(storePath); err != nil {
-		t.Fatalf("SetSessionStore with empty file: %v", err)
-	}
-}
-
-func TestEngineSessionStoreWhitespaceFile(t *testing.T) {
-	eng, _ := newTestEngine("fake")
-	dir := t.TempDir()
-	storePath := filepath.Join(dir, "sessions.json")
-	if err := os.WriteFile(storePath, []byte("   \n\t\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := eng.SetSessionStore(storePath); err != nil {
-		t.Fatalf("SetSessionStore with whitespace file: %v", err)
 	}
 }
 

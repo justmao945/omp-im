@@ -17,9 +17,8 @@ type Config struct {
 	Projects     []ProjectConfig `json:"projects"`
 	Defaults     DefaultsConfig  `json:"default"`
 	Platforms    []PlatformConfig `json:"platforms"`
-	// SessionStore is the path to a file that persists agent session IDs
-	// across restarts. If empty, it defaults to <user home>/.omp-im/sessions.db
-	// (bbolt). A path ending in .json uses a plain JSON file instead.
+	// SessionStore is the path to a bbolt database that persists agent session IDs
+	// across restarts. If empty, it defaults to <user home>/.omp-im/sessions.db.
 	SessionStore string `json:"session_store,omitempty"`
 }
 
