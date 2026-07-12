@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/justmao945/omp-im/internal/config"
+	"github.com/justmao945/omp-im/internal/core"
 )
 
 func TestACPSessionRespond(t *testing.T) {
@@ -26,7 +27,7 @@ func TestACPSessionRespond(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	session, err := agent.StartSession(ctx, "weixin:test")
+	session, err := agent.StartSession(ctx, "weixin:test", core.Project{Name: "default", WorkDir: cfg.WorkDir})
 	if err != nil {
 		t.Fatalf("start session: %v", err)
 	}
@@ -56,7 +57,7 @@ func TestACPSessionMultiTurn(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	session, err := agent.StartSession(ctx, "weixin:test")
+	session, err := agent.StartSession(ctx, "weixin:test", core.Project{Name: "default", WorkDir: cfg.WorkDir})
 	if err != nil {
 		t.Fatalf("start session: %v", err)
 	}
@@ -92,7 +93,7 @@ func TestACPSessionGeneratesFile(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	session, err := agent.StartSession(ctx, "weixin:test")
+	session, err := agent.StartSession(ctx, "weixin:test", core.Project{Name: "default", WorkDir: cfg.WorkDir})
 	if err != nil {
 		t.Fatalf("start session: %v", err)
 	}

@@ -1,12 +1,17 @@
 // Package core provides the minimal abstractions that wire an IM platform
-// to the omp agent. It is intentionally much smaller than cc-connect's core:
-// only one agent (omp) and one platform at a time is required.
+// to one of several agent backends.
 package core
 
 import (
 	"context"
 	"errors"
 )
+
+// Project identifies a working directory for an agent session.
+type Project struct {
+	Name    string
+	WorkDir string
+}
 
 // Platform abstracts a messaging platform (Weixin, WeCom, etc.).
 type Platform interface {
@@ -21,15 +26,15 @@ type Platform interface {
 // MessageHandler is called by a platform when a new user message arrives.
 type MessageHandler func(p Platform, msg *Message)
 
-// Agent abstracts the omp agent backend.
+// Agent abstracts an agent backend (omp, claude, codex, etc.).
 type Agent interface {
 	Name() string
-	// StartSession creates a session for the given conversation key.
-	StartSession(ctx context.Context, sessionKey string) (AgentSession, error)
+	// StartSession creates a session for the given conversation key and project.
+	StartSession(ctx context.Context, sessionKey string, project Project) (AgentSession, error)
 	Stop() error
 }
 
-// AgentSession is a single running conversation with the omp agent.
+// AgentSession is a single running conversation with an agent.
 type AgentSession interface {
 	// Respond sends the current conversation turn to the agent and returns
 	// the assistant's text reply along with any files/images the agent produced.

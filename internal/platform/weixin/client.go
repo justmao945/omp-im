@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -195,4 +196,70 @@ func (c *apiClient) sendMessage(ctx context.Context, msg *sendMessageReq) error 
 		return fmt.Errorf("weixin: sendMessage: ret=%d errcode=%d errmsg=%s", resp.Ret, resp.Errcode, resp.Errmsg)
 	}
 	return nil
+}
+
+func (c *apiClient) fetchLoginQRCode(ctx context.Context, botType string) (*qrCodeResponse, error) {
+	endpoint := fmt.Sprintf("%s/ilink/bot/get_bot_qrcode?bot_type=%s", strings.TrimRight(c.baseURL, "/"), url.QueryEscape(botType))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("weixin: fetchLoginQRCode: new request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("weixin: fetchLoginQRCode: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxIlinkHTTPResponseBody+1))
+	if err != nil {
+		return nil, fmt.Errorf("weixin: fetchLoginQRCode: read body: %w", err)
+	}
+	if len(raw) > maxIlinkHTTPResponseBody {
+		return nil, fmt.Errorf("weixin: fetchLoginQRCode: response body exceeds %d bytes", maxIlinkHTTPResponseBody)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("weixin: fetchLoginQRCode: http %d: %s", resp.StatusCode, truncateForLog(raw, 512))
+	}
+	var out qrCodeResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("weixin: fetchLoginQRCode: json: %w", err)
+	}
+	return &out, nil
+}
+
+func (c *apiClient) pollLoginStatus(ctx context.Context, qrcode string) (*qrStatusResponse, error) {
+	endpoint := fmt.Sprintf("%s/ilink/bot/get_qrcode_status?qrcode=%s", strings.TrimRight(c.baseURL, "/"), url.QueryEscape(qrcode))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("weixin: pollLoginStatus: new request: %w", err)
+	}
+	req.Header.Set("iLink-App-ClientVersion", "1")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("weixin: pollLoginStatus: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxIlinkHTTPResponseBody+1))
+	if err != nil {
+		return nil, fmt.Errorf("weixin: pollLoginStatus: read body: %w", err)
+	}
+	if len(raw) > maxIlinkHTTPResponseBody {
+		return nil, fmt.Errorf("weixin: pollLoginStatus: response body exceeds %d bytes", maxIlinkHTTPResponseBody)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("weixin: pollLoginStatus: http %d: %s", resp.StatusCode, truncateForLog(raw, 512))
+	}
+	var out qrStatusResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("weixin: pollLoginStatus: json: %w", err)
+	}
+	return &out, nil
+}
+
+// setToken updates the client's authorization token.
+func (c *apiClient) setToken(token string) {
+	c.token = strings.TrimSpace(token)
 }

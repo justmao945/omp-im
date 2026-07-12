@@ -4,18 +4,24 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
+	"strings"
 	"sync"
+	"time"
 )
 
-// Engine routes messages between a single IM platform and the omp agent.
+// Engine routes messages between IM platforms and a configurable set of agents.
 type Engine struct {
-	agent     Agent
-	platforms []Platform
+	agents         map[string]Agent
+	defaultAgent   string
+	projects       map[string]Project
+	defaultProject string
+	platforms      []Platform
 
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	sessions   map[string]AgentSession
+	sessions   map[string]*sessionEntry
 	sessionsMu sync.Mutex
 
 	// MaxHistoryTurns limits how many user/assistant exchanges are kept
@@ -23,15 +29,26 @@ type Engine struct {
 	MaxHistoryTurns int
 }
 
-// NewEngine creates an engine with the given agent.
-func NewEngine(agent Agent) *Engine {
+type sessionEntry struct {
+	session      AgentSession
+	agent        string
+	project      string
+	status       string
+	lastActivity time.Time
+}
+
+// NewEngine creates an engine with the given agents and projects.
+func NewEngine(agents map[string]Agent, defaultAgent string, projects map[string]Project, defaultProject string) *Engine {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Engine{
-		agent:           agent,
+		agents:          agents,
+		defaultAgent:    defaultAgent,
+		projects:        projects,
+		defaultProject:  defaultProject,
 		platforms:       make([]Platform, 0),
 		ctx:             ctx,
 		cancel:          cancel,
-		sessions:        make(map[string]AgentSession),
+		sessions:        make(map[string]*sessionEntry),
 		MaxHistoryTurns: 20,
 	}
 }
@@ -67,13 +84,21 @@ func (e *Engine) Stop() error {
 	}
 	e.sessionsMu.Lock()
 	for k, s := range e.sessions {
-		if err := s.Close(); err != nil {
-			slog.Warn("session close error", "session", k, "error", err)
+		if s.session != nil {
+			if err := s.session.Close(); err != nil {
+				slog.Warn("session close error", "session", k, "error", err)
+			}
 		}
 	}
-	e.sessions = make(map[string]AgentSession)
+	e.sessions = make(map[string]*sessionEntry)
 	e.sessionsMu.Unlock()
-	return e.agent.Stop()
+
+	for _, a := range e.agents {
+		if err := a.Stop(); err != nil {
+			slog.Warn("agent stop error", "agent", a.Name(), "error", err)
+		}
+	}
+	return nil
 }
 
 func (e *Engine) handleMessage(p Platform, msg *Message) {
@@ -85,6 +110,16 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 	ctx, cancel := context.WithTimeout(e.ctx, defaultTurnTimeout)
 	defer cancel()
 
+	cmd, isCmd := parseCommand(msg.Content)
+	if isCmd {
+		e.handleCommand(ctx, p, msg, cmd)
+		return
+	}
+
+	e.sessionsMu.Lock()
+	e.touchSessionLocked(msg.SessionKey)
+	e.sessionsMu.Unlock()
+
 	session, err := e.getOrCreateSession(ctx, msg.SessionKey)
 	if err != nil {
 		slog.Error("failed to start session", "session", msg.SessionKey, "error", err)
@@ -92,7 +127,9 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		return
 	}
 
+	e.setSessionStatus(msg.SessionKey, "busy")
 	reply, attachments, err := session.Respond(ctx, msg.Content, msg.Images)
+	e.setSessionStatus(msg.SessionKey, "idle")
 	if err != nil {
 		slog.Error("agent respond error", "session", msg.SessionKey, "error", err)
 		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("处理失败: %v", err))
@@ -134,16 +171,235 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 
 func (e *Engine) getOrCreateSession(ctx context.Context, sessionKey string) (AgentSession, error) {
 	e.sessionsMu.Lock()
-	defer e.sessionsMu.Unlock()
+	ent, ok := e.sessions[sessionKey]
+	if !ok {
+		ent = &sessionEntry{
+			agent:        e.defaultAgent,
+			project:      e.defaultProject,
+			status:       "idle",
+			lastActivity: time.Now(),
+		}
+		e.sessions[sessionKey] = ent
+	}
+	if ent.session != nil {
+		ent.lastActivity = time.Now()
+		e.sessionsMu.Unlock()
+		return ent.session, nil
+	}
+	agentName := ent.agent
+	projectName := ent.project
+	e.sessionsMu.Unlock()
 
-	if s, ok := e.sessions[sessionKey]; ok {
-		return s, nil
+	agent, ok := e.agents[agentName]
+	if !ok {
+		return nil, fmt.Errorf("unknown agent %q", agentName)
+	}
+	project, ok := e.projects[projectName]
+	if !ok {
+		return nil, fmt.Errorf("unknown project %q", projectName)
 	}
 
-	s, err := e.agent.StartSession(ctx, sessionKey)
+	s, err := agent.StartSession(ctx, sessionKey, project)
 	if err != nil {
+		e.sessionsMu.Lock()
+		if ent, ok := e.sessions[sessionKey]; ok {
+			ent.status = "error"
+		}
+		e.sessionsMu.Unlock()
 		return nil, err
 	}
-	e.sessions[sessionKey] = s
+
+	e.sessionsMu.Lock()
+	defer e.sessionsMu.Unlock()
+	if existing, ok := e.sessions[sessionKey]; ok && existing.session != nil {
+		_ = s.Close()
+		return existing.session, nil
+	}
+	ent.session = s
+	ent.status = "idle"
+	ent.lastActivity = time.Now()
 	return s, nil
+}
+
+func (e *Engine) setSessionStatus(sessionKey, status string) {
+	e.sessionsMu.Lock()
+	defer e.sessionsMu.Unlock()
+	if ent, ok := e.sessions[sessionKey]; ok {
+		ent.status = status
+		ent.lastActivity = time.Now()
+	}
+}
+
+func (e *Engine) touchSessionLocked(sessionKey string) {
+	if ent, ok := e.sessions[sessionKey]; ok {
+		ent.lastActivity = time.Now()
+	}
+}
+
+type command struct {
+	name string
+	arg  string
+}
+
+func parseCommand(s string) (command, bool) {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "/") {
+		return command{}, false
+	}
+	parts := strings.Fields(s)
+	name := strings.TrimPrefix(parts[0], "/")
+	arg := ""
+	if len(parts) > 1 {
+		arg = parts[1]
+	}
+	return command{name: name, arg: arg}, true
+}
+
+func (e *Engine) handleCommand(ctx context.Context, p Platform, msg *Message, cmd command) {
+	switch cmd.name {
+	case "agent":
+		e.handleAgentCommand(ctx, p, msg, cmd.arg)
+	case "proj":
+		e.handleProjCommand(ctx, p, msg, cmd.arg)
+	case "list":
+		e.handleListCommand(ctx, p, msg)
+	default:
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("未知命令: /%s", cmd.name))
+	}
+}
+
+func (e *Engine) handleAgentCommand(ctx context.Context, p Platform, msg *Message, arg string) {
+	sessionKey := msg.SessionKey
+	if arg == "" {
+		current := e.sessionAgent(sessionKey)
+		var names []string
+		for name := range e.agents {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("当前 agent: %s\n可用: %s", current, strings.Join(names, ", ")))
+		return
+	}
+	if _, ok := e.agents[arg]; !ok {
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("未知 agent: %s", arg))
+		return
+	}
+	e.setSessionAgent(sessionKey, arg)
+	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("已切换 agent 为 %s，下条消息生效", arg))
+}
+
+func (e *Engine) handleProjCommand(ctx context.Context, p Platform, msg *Message, arg string) {
+	sessionKey := msg.SessionKey
+	if arg == "" {
+		current := e.sessionProject(sessionKey)
+		var names []string
+		for name := range e.projects {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("当前 project: %s\n可用: %s", current, strings.Join(names, ", ")))
+		return
+	}
+	if _, ok := e.projects[arg]; !ok {
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("未知 project: %s", arg))
+		return
+	}
+	e.setSessionProject(sessionKey, arg)
+	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("已切换 project 为 %s，下条消息生效", arg))
+}
+
+func (e *Engine) handleListCommand(ctx context.Context, p Platform, msg *Message) {
+	currentAgent := e.sessionAgent(msg.SessionKey)
+	e.sessionsMu.Lock()
+	var lines []string
+	lines = append(lines, fmt.Sprintf("Agent %s 的 sessions:", currentAgent))
+	for key, ent := range e.sessions {
+		if ent.agent != currentAgent {
+			continue
+		}
+		status := ent.status
+		if status == "" {
+			status = "idle"
+		}
+		proj := ent.project
+		if proj == "" {
+			proj = e.defaultProject
+		}
+		lines = append(lines, fmt.Sprintf("- %s [project=%s status=%s last=%s]", key, proj, status, ent.lastActivity.Format("15:04:05")))
+	}
+	if len(lines) == 1 {
+		lines = append(lines, "（无）")
+	}
+	e.sessionsMu.Unlock()
+	_ = p.Reply(ctx, msg.ReplyCtx, strings.Join(lines, "\n"))
+}
+
+func (e *Engine) sessionAgent(sessionKey string) string {
+	e.sessionsMu.Lock()
+	defer e.sessionsMu.Unlock()
+	if ent, ok := e.sessions[sessionKey]; ok && ent.agent != "" {
+		return ent.agent
+	}
+	return e.defaultAgent
+}
+
+func (e *Engine) sessionProject(sessionKey string) string {
+	e.sessionsMu.Lock()
+	defer e.sessionsMu.Unlock()
+	if ent, ok := e.sessions[sessionKey]; ok && ent.project != "" {
+		return ent.project
+	}
+	return e.defaultProject
+}
+
+func (e *Engine) setSessionAgent(sessionKey, agentName string) {
+	e.sessionsMu.Lock()
+	defer e.sessionsMu.Unlock()
+	ent, ok := e.sessions[sessionKey]
+	if !ok {
+		ent = &sessionEntry{
+			agent:        agentName,
+			project:      e.defaultProject,
+			status:       "idle",
+			lastActivity: time.Now(),
+		}
+		e.sessions[sessionKey] = ent
+		return
+	}
+	if ent.agent == agentName {
+		return
+	}
+	if ent.session != nil {
+		_ = ent.session.Close()
+	}
+	ent.session = nil
+	ent.agent = agentName
+	ent.status = "idle"
+	ent.lastActivity = time.Now()
+}
+
+func (e *Engine) setSessionProject(sessionKey, projectName string) {
+	e.sessionsMu.Lock()
+	defer e.sessionsMu.Unlock()
+	ent, ok := e.sessions[sessionKey]
+	if !ok {
+		ent = &sessionEntry{
+			agent:        e.defaultAgent,
+			project:      projectName,
+			status:       "idle",
+			lastActivity: time.Now(),
+		}
+		e.sessions[sessionKey] = ent
+		return
+	}
+	if ent.project == projectName {
+		return
+	}
+	if ent.session != nil {
+		_ = ent.session.Close()
+	}
+	ent.session = nil
+	ent.project = projectName
+	ent.status = "idle"
+	ent.lastActivity = time.Now()
 }

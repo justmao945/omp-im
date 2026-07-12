@@ -1,54 +1,95 @@
 # omp-im
 
-IM connector for the [omp](https://github.com/justmao945/omp-im) agent. Currently supports Weixin (personal) via the ilink bot HTTP API; WeCom support is planned.
+IM connector for local AI agents. Currently supports Weixin (personal) via the iLink Bot protocol and the `omp` ACP agent; CLAUDE Code / Codex CLI support is planned.
 
 ## Run
 
 ```bash
 cp config.example.json config.json
-# 1. Set your ilink Weixin token under platforms[0].options.token.
-# 2. Optionally set agent.work_dir to the project directory.
+# 1. Configure at least one agent under agents.
+# 2. Configure one or more projects with work_dir.
+# 3. For Weixin, leave platforms[0].options.token empty to login via QR code.
 go run ./cmd/omp-im -config config.json
 ```
 
 ## Architecture
 
-- `internal/core` — minimal `Platform` / `Agent` / `Engine` abstractions.
-- `internal/platform/weixin` — long-poll inbound + text outbound.
+- `internal/core` — `Platform` / `Agent` / `Engine` abstractions, slash-command dispatch, session registry.
+- `internal/platform/weixin` — iLink long-poll inbound + media outbound; QR-code login.
 - `internal/agent/omp` — ACP adapter: JSON-RPC over `omp acp` stdio.
 - `cmd/omp-im` — entry point.
 
+## Configuration
+
+```json
+{
+  "agents": [
+    {
+      "name": "omp",
+      "type": "omp",
+      "command": "omp",
+      "args": ["acp"],
+      "auto_approve_tools": true
+    }
+  ],
+  "projects": [
+    { "name": "default", "work_dir": "/path/to/project" }
+  ],
+  "default": {
+    "agent": "omp",
+    "project": "default"
+  },
+  "platforms": [
+    {
+      "type": "weixin",
+      "options": {
+        "state_dir": "./data/weixin/default",
+        "allow_from": "*"
+      }
+    }
+  ]
+}
+```
+
+- `agents` — one or more agent backends. New sessions use the default agent.
+- `projects` — working directories passed to the agent when starting a session.
+- `default` — global default agent and project for new sessions.
+- `platforms` — IM platforms. Weixin supports both pre-configured token and QR-code login.
+
 ## Weixin setup
 
-1. Obtain an ilink bot Bearer token for your Weixin account.
-2. Set `platforms[0].options.token` in `config.json`.
-3. Optional: set `allow_from` to restrict which Weixin users can talk to the bot.
-4. Start `omp-im` and send the bot a message from an allowed account to establish a `context_token`.
+### QR-code login (recommended)
+
+Leave `platforms[0].options.token` empty. On first start, the terminal prints a QR code URL and saves a PNG to `state_dir/login-qr.png`. Scan the code with WeChat, confirm on your phone, and the login token is persisted to `state_dir/session.json`. Subsequent restarts reuse the saved session automatically.
+
+### Token login
+
+If you already have an iLink bot Bearer token, set `platforms[0].options.token` and the platform skips QR login.
+
+### Access control
+
+Set `allow_from` to a comma-separated list of Weixin user IDs to restrict senders. `"*"` or empty allows everyone.
+
+## Chat commands
+
+Send these commands in any Weixin conversation:
+
+- `/agent` — show current agent and available agents.
+- `/agent <name>` — switch the current conversation to a different agent; the existing session is closed and restarted on the next message.
+- `/proj` — show current project and available projects.
+- `/proj <name>` — switch the current conversation to a different project (changes the agent's working directory).
+- `/list` — list active sessions belonging to the current agent, with project and status.
 
 ## Agent backend
 
 `omp-im` speaks the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) to the local `omp` CLI:
 
-```json
-{
-  "agent": {
-    "command": "omp",
-    "args": ["acp"],
-    "work_dir": "/path/to/project",
-    "auto_approve_tools": true
-  }
-}
-```
-
-- One ACP session is created per Weixin conversation (`session/new`).
+- One ACP session is created per conversation (`session/new`).
 - Each incoming message is sent via `session/prompt`.
 - Assistant text is streamed through `session/update` notifications and delivered back to Weixin.
 - Tool permission requests are auto-approved when `auto_approve_tools = true`.
 - Images attached to Weixin messages are forwarded as ACP image content blocks.
-  Set `platforms[0].options.cdn_base_url` if your gateway uses a non-default CDN host.
 - Files/images created by the agent during a turn are sent back to Weixin automatically.
-  The ACP adapter collects paths from tool call results, reads the files, and the Weixin
-  platform uploads them to the ilink CDN before sending the media message.
 
 ## Current scope
 
@@ -57,3 +98,6 @@ go run ./cmd/omp-im -config config.json
 - Images from Weixin to omp: ✅
 - Tool execution (auto-approved): ✅
 - Sending images/files back to Weixin: ✅
+- Multi-agent switching: ✅
+- Per-project working directories: ✅
+- Weixin QR-code login: ✅

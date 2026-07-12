@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -34,8 +33,8 @@ type replyContext struct {
 }
 
 // Platform implements core.Platform for Weixin personal chat via the ilink bot HTTP API.
+// It supports login via QR code (default) or a pre-configured Bearer token.
 type Platform struct {
-	token      string
 	baseURL    string
 	cdnBaseURL string
 	allowFrom  string
@@ -52,19 +51,15 @@ type Platform struct {
 	cancel   context.CancelFunc
 	stopping bool
 
-	syncBufMu   sync.Mutex
-	syncBuf     string
-	syncBufPath string
+	sessionMu   sync.RWMutex
+	session     *sessionState
+	sessionPath string
 
 	dedupMu sync.Mutex
 	dedup   map[string]time.Time
 
 	pauseMu    sync.Mutex
 	pauseUntil time.Time
-
-	tokensMu   sync.RWMutex
-	tokens     map[string]string
-	tokensPath string
 }
 
 func sanitizePathSegment(s string) string {
@@ -84,13 +79,12 @@ func sanitizePathSegment(s string) string {
 	return b.String()
 }
 
-// New constructs a Weixin platform. Required options: token.
+// New constructs a Weixin platform.
+// If options.token is provided, it is used directly. Otherwise the platform loads
+// a saved session from state_dir/session.json or prompts for QR-code login.
 // Optional: base_url, allow_from, route_tag, account_id, long_poll_timeout_ms, state_dir, proxy.
 func New(opts map[string]any) (*Platform, error) {
 	token, _ := opts["token"].(string)
-	if strings.TrimSpace(token) == "" {
-		return nil, fmt.Errorf("weixin: token is required (ilink bot Bearer token)")
-	}
 	allowFrom, _ := opts["allow_from"].(string)
 	checkAllowFrom("weixin", allowFrom)
 
@@ -113,6 +107,9 @@ func New(opts map[string]any) (*Platform, error) {
 			stateDir = filepath.Join(dataDir, "weixin", sanitizePathSegment(accountLabel))
 		}
 	}
+	if stateDir == "" {
+		stateDir = filepath.Join(".", "data", "weixin", sanitizePathSegment(accountLabel))
+	}
 
 	httpClient := &http.Client{Timeout: defaultAPITimeout}
 	if proxyURL, _ := opts["proxy"].(string); proxyURL != "" {
@@ -124,14 +121,12 @@ func New(opts map[string]any) (*Platform, error) {
 		slog.Info("weixin: using proxy", "proxy", u.Redacted())
 	}
 
-	// WeChat CDN is domestic; bypass any environment proxy by default.
 	cdnHTTPClient := &http.Client{
 		Timeout:   60 * time.Second,
 		Transport: &http.Transport{Proxy: nil},
 	}
 
 	p := &Platform{
-		token:         token,
 		baseURL:       baseURL,
 		cdnBaseURL:    cdnBaseURL,
 		allowFrom:     allowFrom,
@@ -139,20 +134,32 @@ func New(opts map[string]any) (*Platform, error) {
 		stateDir:      stateDir,
 		longPollMS:    lp,
 		dedup:         make(map[string]time.Time),
-		tokens:        make(map[string]string),
 		cdnHTTPClient: cdnHTTPClient,
 	}
 	p.httpClient = httpClient
-	p.api = newAPIClient(baseURL, token, routeTag, httpClient)
+	p.api = newAPIClient(baseURL, "", routeTag, httpClient)
 
-	if stateDir != "" {
-		if err := os.MkdirAll(stateDir, 0o755); err != nil {
-			return nil, fmt.Errorf("weixin: create state dir: %w", err)
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		return nil, fmt.Errorf("weixin: create state dir: %w", err)
+	}
+	p.sessionPath = filepath.Join(stateDir, defaultSessionFile)
+
+	if strings.TrimSpace(token) != "" {
+		p.api.setToken(token)
+		p.session = &sessionState{BotToken: token, BaseURL: normalizeBaseURL(baseURL), Peers: make(map[string]sessionPeer)}
+	} else {
+		state, err := p.loadSession()
+		if err != nil {
+			state, err = performQRLogin(context.Background(), p.api, stateDir)
+			if err != nil {
+				return nil, err
+			}
 		}
-		p.syncBufPath = filepath.Join(stateDir, "get_updates.buf")
-		p.tokensPath = filepath.Join(stateDir, "context_tokens.json")
-		p.loadSyncBuf()
-		p.loadTokens()
+		p.session = state
+		p.api.setToken(state.BotToken)
+		if state.BaseURL != "" {
+			p.api.baseURL = normalizeBaseURL(state.BaseURL) + "/"
+		}
 	}
 
 	return p, nil
@@ -173,76 +180,72 @@ func pickInt(v any) int {
 
 func (p *Platform) Name() string { return "weixin" }
 
-func (p *Platform) loadSyncBuf() {
-	if p.syncBufPath == "" {
+func (p *Platform) loadSession() (*sessionState, error) {
+	p.sessionMu.RLock()
+	defer p.sessionMu.RUnlock()
+	if p.session != nil {
+		return p.session, nil
+	}
+	return loadSessionState(p.sessionPath)
+}
+
+func (p *Platform) persistSession() {
+	p.sessionMu.RLock()
+	state := p.session
+	p.sessionMu.RUnlock()
+	if state == nil {
 		return
 	}
-	b, err := os.ReadFile(p.syncBufPath)
-	if err != nil {
-		return
+	if err := saveSessionState(p.sessionPath, state); err != nil {
+		slog.Warn("weixin: save session failed", "path", p.sessionPath, "error", err)
 	}
-	p.syncBuf = string(b)
+}
+
+func (p *Platform) syncBuf() string {
+	p.sessionMu.RLock()
+	defer p.sessionMu.RUnlock()
+	if p.session == nil {
+		return ""
+	}
+	return p.session.GetUpdatesBuf
 }
 
 func (p *Platform) persistSyncBuf(buf string) {
-	p.syncBuf = buf
-	if p.syncBufPath == "" {
-		return
+	p.sessionMu.Lock()
+	if p.session == nil {
+		p.session = &sessionState{BaseURL: defaultBaseURL, Peers: make(map[string]sessionPeer)}
 	}
-	if err := os.WriteFile(p.syncBufPath, []byte(buf), 0o600); err != nil {
-		slog.Warn("weixin: save sync buf failed", "path", p.syncBufPath, "error", err)
-	}
-}
-
-func (p *Platform) loadTokens() {
-	if p.tokensPath == "" {
-		return
-	}
-	b, err := os.ReadFile(p.tokensPath)
-	if err != nil {
-		return
-	}
-	var m map[string]string
-	if json.Unmarshal(b, &m) != nil {
-		return
-	}
-	p.tokensMu.Lock()
-	p.tokens = m
-	p.tokensMu.Unlock()
-}
-
-func (p *Platform) persistTokens() {
-	if p.tokensPath == "" {
-		return
-	}
-	p.tokensMu.RLock()
-	out, err := json.MarshalIndent(p.tokens, "", "  ")
-	p.tokensMu.RUnlock()
-	if err != nil {
-		return
-	}
-	if err := os.WriteFile(p.tokensPath, out, 0o600); err != nil {
-		slog.Warn("weixin: save context tokens failed", "path", p.tokensPath, "error", err)
-	}
+	p.session.GetUpdatesBuf = buf
+	p.sessionMu.Unlock()
+	p.persistSession()
 }
 
 func (p *Platform) setContextToken(peer, tok string) {
 	if peer == "" || tok == "" {
 		return
 	}
-	p.tokensMu.Lock()
-	if p.tokens == nil {
-		p.tokens = make(map[string]string)
+	p.sessionMu.Lock()
+	if p.session == nil {
+		p.session = &sessionState{BaseURL: defaultBaseURL, Peers: make(map[string]sessionPeer)}
 	}
-	p.tokens[peer] = tok
-	p.tokensMu.Unlock()
-	p.persistTokens()
+	if p.session.Peers == nil {
+		p.session.Peers = make(map[string]sessionPeer)
+	}
+	peerEntry := p.session.Peers[peer]
+	peerEntry.ContextToken = tok
+	peerEntry.LastSeenAt = time.Now().Format(time.RFC3339)
+	p.session.Peers[peer] = peerEntry
+	p.sessionMu.Unlock()
+	p.persistSession()
 }
 
 func (p *Platform) getContextToken(peer string) string {
-	p.tokensMu.RLock()
-	defer p.tokensMu.RUnlock()
-	return p.tokens[peer]
+	p.sessionMu.RLock()
+	defer p.sessionMu.RUnlock()
+	if p.session == nil {
+		return ""
+	}
+	return p.session.Peers[peer].ContextToken
 }
 
 func (p *Platform) isPaused() bool {
@@ -307,9 +310,7 @@ func (p *Platform) pollLoop(ctx context.Context) {
 			}
 		}
 
-		p.syncBufMu.Lock()
-		buf := p.syncBuf
-		p.syncBufMu.Unlock()
+		buf := p.syncBuf()
 
 		resp, err := p.api.getUpdates(ctx, buf, p.longPollMS)
 		if err != nil {
@@ -355,9 +356,7 @@ func (p *Platform) pollLoop(ctx context.Context) {
 		wg.Wait()
 
 		if ctx.Err() == nil && resp.GetUpdatesBuf != "" {
-			p.syncBufMu.Lock()
 			p.persistSyncBuf(resp.GetUpdatesBuf)
-			p.syncBufMu.Unlock()
 		}
 	}
 }
