@@ -253,9 +253,9 @@ func buildStreamContent(rc *replyContext, thinkingDisplay, toolDisplay string, f
 		case rc.toolName != "" && toolDisplay != "off":
 			elapsed := ""
 			if !rc.toolStart.IsZero() {
-				elapsed = fmt.Sprintf("[%s %s] ", spinner(), formatDuration(time.Since(rc.toolStart)))
+				elapsed = fmt.Sprintf(" %s", formatDuration(time.Since(rc.toolStart)))
 			}
-			line := fmt.Sprintf("%s🔧 %s", elapsed, rc.toolName)
+			line := fmt.Sprintf("🔧 %s", rc.toolName)
 			if rc.toolHistory != nil {
 				if n := len(rc.toolHistory); n > 0 {
 					if toolDisplay == "detailed" {
@@ -267,6 +267,7 @@ func buildStreamContent(rc *replyContext, thinkingDisplay, toolDisplay string, f
 					}
 				}
 			}
+			line += elapsed
 			parts = append(parts, line)
 		case rc.thinkingText != "" && thinkingDisplay != "off":
 			if thinkingDisplay == "detailed" {
@@ -274,13 +275,13 @@ func buildStreamContent(rc *replyContext, thinkingDisplay, toolDisplay string, f
 			} else {
 				elapsed := ""
 				if !rc.turnStart.IsZero() {
-					elapsed = fmt.Sprintf("[%s %s] ", spinner(), formatDuration(time.Since(rc.turnStart)))
+					elapsed = fmt.Sprintf(" %s", formatDuration(time.Since(rc.turnStart)))
 				}
-				parts = append(parts, fmt.Sprintf("%s🤔 Thinking...", elapsed))
+				parts = append(parts, fmt.Sprintf("🤔 Thinking...%s", elapsed))
 			}
 		case !rc.turnStart.IsZero():
 			// No thinking or tool yet: show that the turn is in progress.
-			parts = append(parts, fmt.Sprintf("[%s %s] ⚙️ Working...", spinner(), formatDuration(time.Since(rc.turnStart))))
+			parts = append(parts, fmt.Sprintf("⚙️ Working... %s", formatDuration(time.Since(rc.turnStart))))
 		}
 	} else {
 		// Body text has arrived; show it instead of the status line.
@@ -345,13 +346,6 @@ func buildToolDetails(rc *replyContext) string {
 		parts = append(parts, line)
 	}
 	return strings.Join(parts, "\n\n")
-}
-
-// spinner returns a Braille spinner frame that changes every second.
-// It gives the status line a subtle animation while the turn is in progress.
-func spinner() string {
-	frames := []string{"⠋", "⠙", "⠹", "⠸"}
-	return frames[time.Now().Second()%4]
 }
 
 // formatToolInputOneLine parses a tool-call input JSON and returns a compact,
