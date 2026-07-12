@@ -2,17 +2,16 @@ package weixin
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
+
+	qrcode "github.com/skip2/go-qrcode"
 )
 
 const (
@@ -101,8 +100,10 @@ func hasUsableSession(path string) bool {
 	return strings.TrimSpace(state.BotToken) != ""
 }
 
-// performQRLogin fetches a QR code from iLink, saves it as a PNG file, opens
-// the image so the user can scan it, and polls for scan confirmation.
+// performQRLogin fetches a QR code from iLink, renders it as a terminal QR code
+// and a PNG file, and polls for scan confirmation.
+// Note: iLink returns qrcode_img_content as a URL string; the actual QR code
+// should encode this URL, and qrcode is only used for polling status.
 func performQRLogin(ctx context.Context, client *apiClient, stateDir string) (*sessionState, error) {
 	qrResp, err := client.fetchLoginQRCode(ctx, defaultBotType)
 	if err != nil {
@@ -111,20 +112,26 @@ func performQRLogin(ctx context.Context, client *apiClient, stateDir string) (*s
 	if qrResp.QRCode == "" {
 		return nil, errors.New("weixin: QR code content is empty")
 	}
+	qrUrl := strings.TrimSpace(qrResp.QRCodeImgContent)
+	if qrUrl == "" {
+		return nil, errors.New("weixin: QR code URL is empty")
+	}
 
 	qrFile := filepath.Join(stateDir, defaultQRFileName)
-	if err := saveQRCodeImage(qrFile, qrResp.QRCodeImgContent); err != nil {
-		return nil, fmt.Errorf("weixin: failed to save QR code image: %w", err)
+	if err := renderQRCodeImage(qrUrl, qrFile); err != nil {
+		slog.Warn("weixin: failed to save QR code image", "error", err)
 	}
 
 	fmt.Printf("\n=================================================\n")
-	fmt.Printf("请用微信扫描图片 %s 登录\n", qrFile)
+	fmt.Printf("请用微信扫描下方二维码登录：\n")
+	fmt.Printf("备用链接: %s\n", qrUrl)
+	fmt.Printf("图片文件: %s\n", qrFile)
 	fmt.Printf("=================================================\n\n")
 
-	if tryOpenImage(qrFile) {
-		fmt.Println("已自动打开二维码图片，请用微信扫描。")
-	} else {
-		fmt.Println("请手动打开上面的图片文件，用微信扫描。")
+	qr, err := qrcode.New(qrUrl, qrcode.Low)
+	if err == nil {
+		fmt.Println(qr.ToSmallString(false))
+		fmt.Println()
 	}
 
 	slog.Info("weixin: waiting for QR code scan", "deadline", qrLoginDeadline)
@@ -143,35 +150,6 @@ func performQRLogin(ctx context.Context, client *apiClient, stateDir string) (*s
 	}
 	slog.Info("weixin: login successful", "bot_id", state.BotID, "user_id", state.UserID)
 	return state, nil
-}
-
-// tryOpenImage attempts to open the QR image with the system's default image viewer.
-func tryOpenImage(path string) bool {
-	var cmd string
-	var args []string
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = "open"
-		args = []string{path}
-	case "linux":
-		cmd = "xdg-open"
-		args = []string{path}
-	case "windows":
-		cmd = "cmd"
-		args = []string{"/c", "start", path}
-	default:
-		return false
-	}
-	if _, err := exec.LookPath(cmd); err != nil {
-		return false
-	}
-	c := exec.Command(cmd, args...)
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
-	if err := c.Start(); err != nil {
-		return false
-	}
-	return true
 }
 
 func waitForQRLogin(ctx context.Context, client *apiClient, qrcodeContent string) (*qrStatusResponse, error) {
@@ -215,30 +193,14 @@ func waitForQRLogin(ctx context.Context, client *apiClient, qrcodeContent string
 	return nil, errors.New("weixin: QR login timed out")
 }
 
-func saveQRCodeImage(path, b64 string) error {
-	b64 = strings.TrimSpace(b64)
-	if b64 == "" {
-		return errors.New("empty QR image content")
+func renderQRCodeImage(content, path string) error {
+	if strings.TrimSpace(content) == "" {
+		return errors.New("empty QR content")
 	}
-
-	// iLink sometimes returns a data URL like "data:image/png;base64,AAAA...".
-	if idx := strings.Index(b64, "base64,"); idx != -1 {
-		b64 = b64[idx+len("base64,"):]
-	}
-
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-
-	// Try standard base64 first, then URL-safe base64.
-	data, err := base64.StdEncoding.DecodeString(b64)
-	if err != nil {
-		data, err = base64.URLEncoding.DecodeString(b64)
-		if err != nil {
-			return fmt.Errorf("decode QR image: %w", err)
-		}
-	}
-	return os.WriteFile(path, data, 0o600)
+	return qrcode.WriteFile(content, qrcode.Low, 256, path)
 }
 
 func normalizeBaseURL(baseURL string) string {

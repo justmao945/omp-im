@@ -60,7 +60,7 @@ Leave `platforms[0].options.token` empty and run the login subcommand:
 omp-im weixin login
 ```
 
-This fetches the official QR code from iLink, saves it to `~/.omp-im/weixin/default/login-qr.png`, and tries to open it with the system default image viewer. Scan the saved image with WeChat, confirm on your phone, and the login token is persisted to `~/.omp-im/weixin/default/session.json`. After that, start the server normally:
+iLink returns a login URL; `omp-im` renders it as an ASCII QR code in the terminal and also saves it as `~/.omp-im/weixin/default/login-qr.png`. Scan the terminal QR code with WeChat, confirm on your phone, and the login token is persisted to `~/.omp-im/weixin/default/session.json`. After that, start the server normally:
 
 ```bash
 omp-im
@@ -104,6 +104,21 @@ Send these commands in any Weixin conversation:
 - Tool permission requests are auto-approved when the built-in `omp` agent is used.
 - Images attached to Weixin messages are forwarded as ACP image content blocks.
 - Session state read from agent: ✅
+
+## Development
+
+This project depends on `github.com/skip2/go-qrcode` for terminal QR-code output. If the default Go module proxy is slow or unreachable, use a domestic mirror:
+
+```bash
+GOPROXY=https://goproxy.cn go mod download
+GOPROXY=https://goproxy.cn go build ./...
+```
+
+Or set it globally:
+
+```bash
+go env -w GOPROXY=https://goproxy.cn,direct
+```
 
 ## Current scope
 
