@@ -215,18 +215,23 @@ func buildStreamFooter(rc *replyContext) string {
 	return "> " + strings.Join(items, " · ")
 }
 
-// formatDuration returns a concise human-readable duration (e.g. "1.2s", "3ms").
+// formatDuration returns a human-readable duration rounded to seconds.
+// Values under a minute are shown as seconds; otherwise minutes and seconds.
 func formatDuration(d time.Duration) string {
 	if d < 0 {
 		d = 0
 	}
-	if d < time.Millisecond {
-		return "0s"
+	d = d.Round(time.Second)
+	secs := int(d.Seconds())
+	if secs < 60 {
+		return fmt.Sprintf("%ds", secs)
 	}
-	if d < time.Second {
-		return d.Truncate(time.Millisecond).String()
+	mins := secs / 60
+	secs = secs % 60
+	if secs == 0 {
+		return fmt.Sprintf("%dm", mins)
 	}
-	return d.Truncate(10 * time.Millisecond).String()
+	return fmt.Sprintf("%dm%ds", mins, secs)
 }
 
 func plural(n int) string {

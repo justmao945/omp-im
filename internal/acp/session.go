@@ -363,9 +363,12 @@ func (s *Session) Respond(ctx context.Context, prompt string, images []core.Imag
 				s.setUsageUpdate(used, size)
 			}
 			if hasToolCall(params) {
-				cmd := ""
-				if toolCallKind(params) == "execute" {
-					cmd = toolCallCommand(params)
+				cmd := toolCallCommand(params)
+				if cmd == "" {
+					cmd = toolCallPath(params)
+				}
+				if cmd == "" {
+					cmd = toolCallKind(params)
 				}
 				slog.Info("acp: tool call started", "session", s.sessionKey, "kind", toolCallKind(params), "path", toolCallPath(params), "command", truncate(cmd, 200))
 				s.setToolStatus(true, cmd)
