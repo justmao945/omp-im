@@ -3,6 +3,7 @@ package wecom
 import (
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -52,12 +53,14 @@ type toolRecord struct {
 
 // replyContext stores the data needed to reply to a specific inbound message.
 type replyContext struct {
+	mu sync.Mutex
+
 	chatid     string
 	chattype   string
 	reqID      string
-	aibotid    string         // robot id, used to strip @-mentions in groups
-	streamID   string         // reused across stream chunks for a single turn
-	streamText string         // accumulated visible text for WeCom stream refresh mode
+	aibotid    string // robot id, used to strip @-mentions in groups
+	streamID   string // reused across stream chunks for a single turn
+	streamText string // accumulated visible text for WeCom stream refresh mode
 
 	// streaming state
 	thinkingText     string
@@ -72,6 +75,9 @@ type replyContext struct {
 	lastRender       time.Time
 	contextUsed      int
 	contextSize      int
+
+	stopTicker func() // stops the per-second status-line ticker
+	finished   bool   // turn has ended; stop further renders
 }
 
 // wsFrame is the top-level envelope received over the WebSocket.

@@ -55,11 +55,19 @@ func (p *Platform) StreamReply(ctx context.Context, replyCtx any, delta string, 
 	if rc.chatid == "" {
 		return fmt.Errorf("wecom: chatid is empty")
 	}
+
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+
 	if rc.streamID == "" {
 		rc.streamID = generateReqID()
 		if rc.turnStart.IsZero() {
 			rc.turnStart = time.Now()
 		}
+		p.startStreamTicker(ctx, rc)
+	}
+	if finished {
+		rc.finished = true
 	}
 
 	if rc.thinkingText != "" && rc.thinkingEnd.IsZero() {
@@ -90,11 +98,16 @@ func (p *Platform) StreamEvent(ctx context.Context, replyCtx any, ev core.Stream
 	if rc.chatid == "" {
 		return fmt.Errorf("wecom: chatid is empty")
 	}
+
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+
 	if rc.streamID == "" {
 		rc.streamID = generateReqID()
 		if rc.turnStart.IsZero() {
 			rc.turnStart = time.Now()
 		}
+		p.startStreamTicker(ctx, rc)
 	}
 
 	switch ev.Type {
@@ -147,6 +160,36 @@ func (p *Platform) StreamEvent(ctx context.Context, replyCtx any, ev core.Stream
 	return p.renderStream(ctx, rc, false)
 }
 
+// startStreamTicker starts a goroutine that re-renders the status line every
+// second so the elapsed time ticks smoothly even when no new events arrive.
+func (p *Platform) startStreamTicker(ctx context.Context, rc *replyContext) {
+	if rc.stopTicker != nil {
+		return
+	}
+	ticker := time.NewTicker(time.Second)
+	done := make(chan struct{})
+	rc.stopTicker = func() {
+		ticker.Stop()
+		close(done)
+	}
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				rc.mu.Lock()
+				if rc.streamText == "" && !rc.finished {
+					_ = p.renderStream(ctx, rc, false)
+				}
+				rc.mu.Unlock()
+			case <-ctx.Done():
+				return
+			case <-done:
+				return
+			}
+		}
+	}()
+}
+
 // renderStream builds the current stream content and sends it to WeCom.
 // Non-final updates are throttled to at most one render per second.
 func (p *Platform) renderStream(ctx context.Context, rc *replyContext, finished bool) error {
@@ -154,9 +197,16 @@ func (p *Platform) renderStream(ctx context.Context, rc *replyContext, finished 
 		rc.streamID = generateReqID()
 	}
 	if finished {
+		rc.finished = true
 		rc.turnEnd = time.Now()
 	} else if !rc.lastRender.IsZero() && time.Since(rc.lastRender) < time.Second {
 		return nil
+	}
+
+	// Stop the ticker once the body has arrived or the turn has finished.
+	if (rc.streamText != "" || finished) && rc.stopTicker != nil {
+		rc.stopTicker()
+		rc.stopTicker = nil
 	}
 
 	content := buildStreamContent(rc, p.cfg.thinkingDisplay, p.cfg.toolDisplay, finished)
