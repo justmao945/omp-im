@@ -110,7 +110,7 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 	if err := e.ctx.Err(); err != nil {
 		return
 	}
-	slog.Info("incoming message", "platform", msg.Platform, "session", msg.SessionKey, "user", msg.UserID)
+	slog.Info("incoming message", "platform", msg.Platform, "session", msg.SessionKey, "user", msg.UserID, "content", truncate(msg.Content, 200))
 
 	ctx, cancel := context.WithTimeout(e.ctx, defaultTurnTimeout)
 	defer cancel()
@@ -148,6 +148,11 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			// The turn was cancelled by /esc or shutdown; do not send an error reply.
+			return
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			slog.Error("agent turn timed out", "session", msg.SessionKey, "error", err)
+			_ = p.Reply(ctx, msg.ReplyCtx, "处理超时，请重试或发送 /esc 中断")
 			return
 		}
 		slog.Error("agent turn error", "session", msg.SessionKey, "error", err)
@@ -484,6 +489,13 @@ func formatDuration(d time.Duration) string {
 		return d.Round(time.Second).String()
 	}
 	return d.Round(time.Second).String()
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
 }
 
 func (e *Engine) sessionAgent(sessionKey string) string {

@@ -171,11 +171,11 @@ func (s *acpSession) Respond(ctx context.Context, prompt string, images []core.I
 				mu.Unlock()
 			}
 			if hasToolCall(params) {
-				slog.Debug("acp: tool call started", "session", s.sessionKey)
+				slog.Info("acp: tool call started", "session", s.sessionKey, "kind", toolCallKind(params), "path", toolCallPath(params))
 				s.setToolStatus(true)
 			}
 			if isToolCallCompleted(params) {
-				slog.Debug("acp: tool call completed", "session", s.sessionKey)
+				slog.Info("acp: tool call completed", "session", s.sessionKey)
 				s.setToolStatus(false)
 			}
 			collectToolCall(params, toolCalls)
@@ -236,9 +236,13 @@ func (s *acpSession) Respond(ctx context.Context, prompt string, images []core.I
 
 func (s *acpSession) setStatus(status string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	old := s.currentStatus
 	s.currentStatus = status
 	s.lastActivityAt = time.Now()
+	s.mu.Unlock()
+	if old != status {
+		slog.Info("acp: session status changed", "session", s.sessionKey, "from", old, "to", status)
+	}
 }
 
 func (s *acpSession) touch() {
@@ -303,7 +307,7 @@ func (s *acpSession) startTurnStatus() {
 
 func (s *acpSession) setToolStatus(active bool) {
 	s.statusMu.Lock()
-	defer s.statusMu.Unlock()
+	old := s.agentStatus.State
 	if active {
 		s.agentStatus.State = "using_tools"
 		s.toolCount++
@@ -311,6 +315,11 @@ func (s *acpSession) setToolStatus(active bool) {
 	} else {
 		s.agentStatus.State = "thinking"
 		s.currentTool = time.Time{}
+	}
+	s.statusMu.Unlock()
+	state := s.agentStatus.State
+	if old != state {
+		slog.Info("acp: turn status changed", "session", s.sessionKey, "from", old, "to", state)
 	}
 }
 
@@ -432,6 +441,41 @@ func hasToolCall(params json.RawMessage) bool {
 		return false
 	}
 	return head.SessionUpdate == "tool_call" && head.ToolCallID != ""
+}
+
+func toolCallKind(params json.RawMessage) string {
+	var wrap struct {
+		Update json.RawMessage `json:"update"`
+	}
+	if err := json.Unmarshal(params, &wrap); err != nil {
+		return ""
+	}
+	var head struct {
+		Kind string `json:"kind"`
+	}
+	_ = json.Unmarshal(wrap.Update, &head)
+	return head.Kind
+}
+
+func toolCallPath(params json.RawMessage) string {
+	var wrap struct {
+		Update json.RawMessage `json:"update"`
+	}
+	if err := json.Unmarshal(params, &wrap); err != nil {
+		return ""
+	}
+	var head struct {
+		RawInput json.RawMessage `json:"rawInput"`
+		Locations []struct {
+			Path string `json:"path"`
+		} `json:"locations"`
+	}
+	_ = json.Unmarshal(wrap.Update, &head)
+	path := extractPathFromRawInput(head.RawInput)
+	if path == "" && len(head.Locations) > 0 {
+		path = head.Locations[0].Path
+	}
+	return path
 }
 
 func isToolCallCompleted(params json.RawMessage) bool {
