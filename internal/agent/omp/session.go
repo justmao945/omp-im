@@ -171,7 +171,11 @@ func (s *acpSession) Respond(ctx context.Context, prompt string, images []core.I
 				mu.Unlock()
 			}
 			if hasToolCall(params) {
-				slog.Info("acp: tool call started", "session", s.sessionKey, "kind", toolCallKind(params), "path", toolCallPath(params))
+				cmd := ""
+				if toolCallKind(params) == "execute" {
+					cmd = toolCallCommand(params)
+				}
+				slog.Info("acp: tool call started", "session", s.sessionKey, "kind", toolCallKind(params), "path", toolCallPath(params), "command", truncate(cmd, 200))
 				s.setToolStatus(true)
 			}
 			if isToolCallCompleted(params) {
@@ -457,6 +461,24 @@ func toolCallKind(params json.RawMessage) string {
 	return head.Kind
 }
 
+func toolCallCommand(params json.RawMessage) string {
+	var wrap struct {
+		Update json.RawMessage `json:"update"`
+	}
+	if err := json.Unmarshal(params, &wrap); err != nil {
+		return ""
+	}
+	var input struct {
+		Command string `json:"command"`
+		Cmd     string `json:"cmd"`
+	}
+	_ = json.Unmarshal(wrap.Update, &input)
+	if input.Command != "" {
+		return input.Command
+	}
+	return input.Cmd
+}
+
 func toolCallPath(params json.RawMessage) string {
 	var wrap struct {
 		Update json.RawMessage `json:"update"`
@@ -592,4 +614,18 @@ func detectMime(name string, data []byte) string {
 		}
 	}
 	return http.DetectContentType(data)
+}
+
+func truncate(s string, max int) string {
+	if max <= 0 {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	if max <= 3 {
+		return string(runes[:max])
+	}
+	return string(runes[:max-3]) + "..."
 }
