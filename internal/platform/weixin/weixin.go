@@ -389,10 +389,10 @@ func (p *Platform) pollLoop(ctx context.Context) {
 		}
 
 		for i := range resp.Msgs {
-			// Dispatch every message in its own goroutine. Normal messages are
-			// still serialized per session by acpSession.turnMu, but control
-			// commands like /p and /esc can run while a normal turn is blocked.
-			go p.dispatchInbound(ctx, &resp.Msgs[i], h)
+			// The engine queues normal messages and handles control commands
+			// immediately, so sequential dispatch here preserves the platform's
+			// message order without blocking on long agent turns.
+			p.dispatchInbound(ctx, &resp.Msgs[i], h)
 		}
 
 		if ctx.Err() == nil && resp.GetUpdatesBuf != "" {

@@ -33,12 +33,25 @@ type Engine struct {
 	MaxHistoryTurns int
 }
 
+type queuedMessage struct {
+	p   Platform
+	msg *Message
+}
+
 type sessionEntry struct {
 	session      AgentSession
 	agent        string
 	project      string
 	status       string
 	lastActivity time.Time
+
+	// queue holds normal messages waiting to be processed in order for this
+	// session. A single worker goroutine drains the queue and exits when it is
+	// empty, so ordering is preserved even when the platform dispatches
+	// messages concurrently.
+	queue      []*queuedMessage
+	processing bool
+	closed     bool
 }
 
 // NewEngine creates an engine with the given agents and projects.
@@ -88,10 +101,12 @@ func (e *Engine) Stop() error {
 		}
 	}
 	e.sessionsMu.Lock()
-	for k, s := range e.sessions {
-		if s.session != nil {
-			if err := s.session.Close(); err != nil {
-				slog.Warn("session close error", "session", k, "error", err)
+	for _, ent := range e.sessions {
+		ent.closed = true
+		ent.queue = nil
+		if ent.session != nil {
+			if err := ent.session.Close(); err != nil {
+				slog.Warn("session close error", "error", err)
 			}
 		}
 	}
@@ -110,27 +125,79 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 	if err := e.ctx.Err(); err != nil {
 		return
 	}
+	if msg.UserID == "" {
+		return
+	}
 	slog.Info("incoming message", "platform", msg.Platform, "session", msg.SessionKey, "user", msg.UserID, "content", truncate(msg.Content, 200))
-
-	ctx, cancel := context.WithTimeout(e.ctx, defaultTurnTimeout)
-	defer cancel()
 
 	cmd, isCmd := parseCommand(msg.Content)
 	if isCmd {
+		ctx, cancel := context.WithTimeout(e.ctx, defaultTurnTimeout)
+		defer cancel()
 		e.handleCommand(ctx, p, msg, cmd)
 		return
 	}
 
-	e.sessionsMu.Lock()
-	e.touchSessionLocked(msg.SessionKey)
-	e.sessionsMu.Unlock()
+	e.queueNormalMessage(p, msg)
+}
 
-	session, err := e.getOrCreateSession(ctx, msg.SessionKey)
-	if err != nil {
+func (e *Engine) queueNormalMessage(p Platform, msg *Message) {
+	e.sessionsMu.Lock()
+	ent, ok := e.sessions[msg.SessionKey]
+	if !ok || ent.closed {
+		ent = &sessionEntry{
+			agent:        e.defaultAgent,
+			project:      e.defaultProject,
+			status:       "idle",
+			lastActivity: time.Now(),
+		}
+		e.sessions[msg.SessionKey] = ent
+	}
+	ent.lastActivity = time.Now()
+	ent.queue = append(ent.queue, &queuedMessage{p: p, msg: msg})
+	if !ent.processing {
+		ent.processing = true
+		go e.sessionWorker(msg.SessionKey)
+	}
+	e.sessionsMu.Unlock()
+}
+
+func (e *Engine) sessionWorker(sessionKey string) {
+	for {
+		e.sessionsMu.Lock()
+		ent, ok := e.sessions[sessionKey]
+		if !ok || ent == nil || ent.closed || len(ent.queue) == 0 {
+			if ok && ent != nil {
+				ent.processing = false
+			}
+			e.sessionsMu.Unlock()
+			return
+		}
+		qm := ent.queue[0]
+		ent.queue = ent.queue[1:]
+		e.sessionsMu.Unlock()
+
+		ctx, cancel := context.WithTimeout(e.ctx, defaultTurnTimeout)
+		e.processNormalMessage(ctx, cancel, qm.p, qm.msg, ent)
+		cancel()
+	}
+}
+
+func (e *Engine) processNormalMessage(ctx context.Context, cancel context.CancelFunc, p Platform, msg *Message, ent *sessionEntry) {
+	if err := e.ensureSessionForEntry(ctx, ent, msg.SessionKey); err != nil {
 		slog.Error("failed to start session", "session", msg.SessionKey, "error", err)
 		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("无法启动会话: %v", err))
 		return
 	}
+
+	e.sessionsMu.Lock()
+	if ent.session == nil {
+		e.sessionsMu.Unlock()
+		return
+	}
+	ent.lastActivity = time.Now()
+	Session := ent.session
+	e.sessionsMu.Unlock()
 
 	slog.Info("agent turn started", "session", msg.SessionKey, "agent", e.sessionAgent(msg.SessionKey), "project", e.sessionProject(msg.SessionKey))
 	e.setSessionStatus(msg.SessionKey, "busy")
@@ -138,7 +205,7 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 	e.activeTurns[msg.SessionKey] = cancel
 	e.activeTurnsMu.Unlock()
 
-	reply, attachments, err := session.Respond(ctx, msg.Content, msg.Images)
+	reply, attachments, err := Session.Respond(ctx, msg.Content, msg.Images)
 
 	e.activeTurnsMu.Lock()
 	delete(e.activeTurns, msg.SessionKey)
@@ -195,22 +262,19 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 	}
 }
 
-func (e *Engine) getOrCreateSession(ctx context.Context, sessionKey string) (AgentSession, error) {
+func (e *Engine) ensureSessionForEntry(ctx context.Context, ent *sessionEntry, sessionKey string) error {
 	e.sessionsMu.Lock()
-	ent, ok := e.sessions[sessionKey]
-	if !ok {
-		ent = &sessionEntry{
-			agent:        e.defaultAgent,
-			project:      e.defaultProject,
-			status:       "idle",
-			lastActivity: time.Now(),
-		}
-		e.sessions[sessionKey] = ent
-	}
+	// If a session already exists for this entry, use it even if the entry was
+	// marked closed by /new while the current message was being processed.
 	if ent.session != nil {
 		ent.lastActivity = time.Now()
 		e.sessionsMu.Unlock()
-		return ent.session, nil
+		return nil
+	}
+	if ent.closed {
+		// /new was called before a session was created; drop the message.
+		e.sessionsMu.Unlock()
+		return nil
 	}
 	agentName := ent.agent
 	projectName := ent.project
@@ -218,33 +282,31 @@ func (e *Engine) getOrCreateSession(ctx context.Context, sessionKey string) (Age
 
 	agent, ok := e.agents[agentName]
 	if !ok {
-		return nil, fmt.Errorf("unknown agent %q", agentName)
+		return fmt.Errorf("unknown agent %q", agentName)
 	}
 	project, ok := e.projects[projectName]
 	if !ok {
-		return nil, fmt.Errorf("unknown project %q", projectName)
+		return fmt.Errorf("unknown project %q", projectName)
 	}
 
 	s, err := agent.StartSession(ctx, sessionKey, project)
 	if err != nil {
 		e.sessionsMu.Lock()
-		if ent, ok := e.sessions[sessionKey]; ok {
-			ent.status = "error"
-		}
+		ent.status = "error"
 		e.sessionsMu.Unlock()
-		return nil, err
+		return err
 	}
 
 	e.sessionsMu.Lock()
-	defer e.sessionsMu.Unlock()
-	if existing, ok := e.sessions[sessionKey]; ok && existing.session != nil {
+	if ent.closed || ent.session != nil {
 		_ = s.Close()
-		return existing.session, nil
+	} else {
+		ent.session = s
+		ent.status = "idle"
+		ent.lastActivity = time.Now()
 	}
-	ent.session = s
-	ent.status = "idle"
-	ent.lastActivity = time.Now()
-	return s, nil
+	e.sessionsMu.Unlock()
+	return nil
 }
 
 func (e *Engine) setSessionStatus(sessionKey, status string) {
@@ -472,6 +534,10 @@ func (e *Engine) handleNewCommand(ctx context.Context, p Platform, msg *Message)
 
 	e.sessionsMu.Lock()
 	ent, ok := e.sessions[sessionKey]
+	if ok && ent != nil {
+		ent.closed = true
+		ent.queue = nil
+	}
 	delete(e.sessions, sessionKey)
 	e.sessionsMu.Unlock()
 

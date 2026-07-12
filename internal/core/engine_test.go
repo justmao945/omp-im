@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -174,29 +175,85 @@ func TestEngineRoutesMessage(t *testing.T) {
 
 func TestEngineSessionReuse(t *testing.T) {
 	eng, agent := newTestEngine("fake")
+	p := &fakePlatform{name: "fake"}
+	eng.AddPlatform(p)
 
-	s1, err := eng.getOrCreateSession(context.Background(), "k1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	s2, err := eng.getOrCreateSession(context.Background(), "k1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if s1 != s2 {
-		t.Fatal("expected same session for same key")
-	}
+	go func() {
+		for p.getHandler() == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+		p.getHandler()(p, &Message{
+			SessionKey: "fake:u1",
+			Platform:   "fake",
+			UserID:     "u1",
+			Content:    "hello",
+			ReplyCtx:   "ctx",
+		})
+		p.getHandler()(p, &Message{
+			SessionKey: "fake:u1",
+			Platform:   "fake",
+			UserID:     "u1",
+			Content:    "again",
+			ReplyCtx:   "ctx",
+		})
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		_ = eng.Run()
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	_ = eng.Stop()
+	<-done
+
 	if agent.Started() != 1 {
 		t.Fatalf("started %d sessions, want 1", agent.Started())
+	}
+
+	p.mu.Lock()
+	replies := append([]string(nil), p.replies...)
+	p.mu.Unlock()
+	if len(replies) != 2 {
+		t.Fatalf("got %d replies, want 2", len(replies))
 	}
 }
 
 func TestEngineSessionCreationFailure(t *testing.T) {
 	agent := &fakeAgent{name: "fake", err: errors.New("boom")}
 	eng := NewEngine(map[string]Agent{"fake": agent}, "fake", map[string]Project{"default": {Name: "default"}}, "default")
-	_, err := eng.getOrCreateSession(context.Background(), "k1")
-	if err == nil {
-		t.Fatal("expected error")
+	p := &fakePlatform{name: "fake"}
+	eng.AddPlatform(p)
+
+	go func() {
+		for p.getHandler() == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+		p.getHandler()(p, &Message{
+			SessionKey: "fake:u1",
+			Platform:   "fake",
+			UserID:     "u1",
+			Content:    "hello",
+			ReplyCtx:   "ctx",
+		})
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		_ = eng.Run()
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	_ = eng.Stop()
+	<-done
+
+	p.mu.Lock()
+	replies := append([]string(nil), p.replies...)
+	p.mu.Unlock()
+	if len(replies) != 1 || !strings.Contains(replies[0], "无法启动会话") {
+		t.Fatalf("replies = %v", replies)
 	}
 }
 
@@ -659,3 +716,109 @@ func TestEngineProjCommand(t *testing.T) {
 		t.Fatalf("replies = %v", replies)
 	}
 }
+
+func TestEnginePCommandDuringActiveTurn(t *testing.T) {
+	a1 := &fakeAgent{name: "slow", reply: "slow-reply", respondDelay: 5 * time.Second}
+	eng := NewEngine(
+		map[string]Agent{"slow": a1},
+		"slow",
+		map[string]Project{"default": {Name: "default", WorkDir: "/tmp"}},
+		"default",
+	)
+	p := &fakePlatform{name: "fake"}
+	eng.AddPlatform(p)
+
+	go func() {
+		for p.getHandler() == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+		go p.getHandler()(p, &Message{
+			SessionKey: "fake:u1",
+			Platform:   "fake",
+			UserID:     "u1",
+			Content:    "please wait",
+			ReplyCtx:   "ctx",
+		})
+		time.Sleep(50 * time.Millisecond)
+		p.getHandler()(p, &Message{
+			SessionKey: "fake:u1",
+			Platform:   "fake",
+			UserID:     "u1",
+			Content:    "/p",
+			ReplyCtx:   "ctx",
+		})
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		_ = eng.Run()
+		close(done)
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	_ = eng.Stop()
+	<-done
+
+	p.mu.Lock()
+	replies := append([]string(nil), p.replies...)
+	p.mu.Unlock()
+
+	// /p should reply immediately while the slow turn is still queued/active.
+	if len(replies) != 1 || !strings.Contains(replies[0], "Agent:") {
+		t.Fatalf("replies = %v", replies)
+	}
+}
+
+func TestEngineMessageOrderingPerSession(t *testing.T) {
+	a1 := &fakeAgent{name: "count", reply: "ok"}
+	eng := NewEngine(
+		map[string]Agent{"count": a1},
+		"count",
+		map[string]Project{"default": {Name: "default", WorkDir: "/tmp"}},
+		"default",
+	)
+	p := &fakePlatform{name: "fake"}
+	eng.AddPlatform(p)
+
+	go func() {
+		for p.getHandler() == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+		// Send several messages sequentially (mirroring platform dispatch).
+		// The engine queues them and processes them in the same order.
+		for i := 1; i <= 5; i++ {
+			p.getHandler()(p, &Message{
+				SessionKey: "fake:u1",
+				Platform:   "fake",
+				UserID:     "u1",
+				Content:    fmt.Sprintf("msg%d", i),
+				ReplyCtx:   "ctx",
+			})
+		}
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		_ = eng.Run()
+		close(done)
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	_ = eng.Stop()
+	<-done
+
+	p.mu.Lock()
+	replies := append([]string(nil), p.replies...)
+	p.mu.Unlock()
+
+	if len(replies) != 5 {
+		t.Fatalf("got %d replies, want 5", len(replies))
+	}
+	for i, r := range replies {
+		want := fmt.Sprintf("ok:msg%d", i+1)
+		if r != want {
+			t.Fatalf("reply[%d] = %q, want %q", i, r, want)
+		}
+	}
+}
+
