@@ -389,16 +389,10 @@ func (p *Platform) pollLoop(ctx context.Context) {
 		}
 
 		for i := range resp.Msgs {
-			m := &resp.Msgs[i]
-			// /esc and /p are status/control commands and should be able to run
-			// while a turn is in progress. Dispatch them concurrently; normal
-			// messages are still handled sequentially to preserve reply order.
-			body := strings.TrimSpace(bodyFromItemList(m.ItemList))
-			if body == "/esc" || body == "/p" {
-				go p.dispatchInbound(ctx, m, h)
-			} else {
-				p.dispatchInbound(ctx, m, h)
-			}
+			// Dispatch every message in its own goroutine. Normal messages are
+			// still serialized per session by acpSession.turnMu, but control
+			// commands like /p and /esc can run while a normal turn is blocked.
+			go p.dispatchInbound(ctx, &resp.Msgs[i], h)
 		}
 
 		if ctx.Err() == nil && resp.GetUpdatesBuf != "" {
