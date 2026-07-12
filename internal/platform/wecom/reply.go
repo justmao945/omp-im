@@ -102,11 +102,23 @@ func (p *Platform) StreamEvent(ctx context.Context, replyCtx any, ev core.Stream
 		if rc.turnStart.IsZero() {
 			rc.turnStart = time.Now()
 		}
+		if ev.Status.ContextSize > 0 {
+			rc.contextUsed = ev.Status.ContextUsed
+			rc.contextSize = ev.Status.ContextSize
+		}
 	case "thinking":
 		rc.thinkingText += ev.Text
+		if ev.Status.ContextSize > 0 {
+			rc.contextUsed = ev.Status.ContextUsed
+			rc.contextSize = ev.Status.ContextSize
+		}
 	case "tool_start":
 		if rc.thinkingText != "" && rc.thinkingEnd.IsZero() {
 			rc.thinkingEnd = time.Now()
+		}
+		if ev.Status.ContextSize > 0 {
+			rc.contextUsed = ev.Status.ContextUsed
+			rc.contextSize = ev.Status.ContextSize
 		}
 		rc.toolName = ev.Tool
 		rc.toolStart = time.Now()
@@ -118,6 +130,10 @@ func (p *Platform) StreamEvent(ctx context.Context, replyCtx any, ev core.Stream
 	case "tool_end":
 		if !rc.toolStart.IsZero() {
 			rc.toolTotalDuration += time.Since(rc.toolStart)
+		}
+		if ev.Status.ContextSize > 0 {
+			rc.contextUsed = ev.Status.ContextUsed
+			rc.contextSize = ev.Status.ContextSize
 		}
 		rc.toolCount++
 		rc.toolName = ""
@@ -203,7 +219,7 @@ func buildStreamContent(rc *replyContext, thinkingDisplay, toolDisplay string, f
 			}
 		case !rc.turnStart.IsZero():
 			// No thinking or tool yet: show that the turn is in progress.
-			parts = append(parts, fmt.Sprintf("⏳ 处理中... %s", formatDuration(time.Since(rc.turnStart))))
+			parts = append(parts, fmt.Sprintf("⏳ Processing... %s", formatDuration(time.Since(rc.turnStart))))
 		}
 	} else {
 		// Body text has arrived; show it instead of the status line.
@@ -239,6 +255,10 @@ func buildStreamFooter(rc *replyContext, thinkingDisplay, toolDisplay string) st
 		items = append(items, fmt.Sprintf("total %s", formatDuration(rc.turnEnd.Sub(rc.turnStart))))
 	} else if !rc.turnStart.IsZero() {
 		items = append(items, fmt.Sprintf("total %s", formatDuration(time.Since(rc.turnStart))))
+	}
+	if rc.contextSize > 0 {
+		pct := rc.contextUsed * 100 / rc.contextSize
+		items = append(items, fmt.Sprintf("ctx %d%%", pct))
 	}
 
 	footer := "> " + strings.Join(items, " · ")

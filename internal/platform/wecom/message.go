@@ -70,6 +70,8 @@ type replyContext struct {
 	turnStart        time.Time
 	turnEnd          time.Time
 	lastRender       time.Time
+	contextUsed      int
+	contextSize      int
 }
 
 // wsFrame is the top-level envelope received over the WebSocket.

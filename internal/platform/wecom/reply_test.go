@@ -53,7 +53,7 @@ func TestBuildStreamContent(t *testing.T) {
 			setup: func(rc *replyContext) {
 				rc.turnStart = time.Now().Add(-3 * time.Second)
 			},
-			wantContains: []string{"处理中", "3s"},
+			wantContains: []string{"Processing", "3s"},
 		},
 		{
 			name:     "processing hidden when body arrives",
@@ -134,6 +134,31 @@ func TestBuildStreamContent(t *testing.T) {
 			},
 			wantContains:   []string{"body text"},
 			wantNotContain: "git status",
+		},
+		{
+			name:     "finish footer with context",
+			thinking: "concise",
+			tool:     "concise",
+			finished: true,
+			setup: func(rc *replyContext) {
+				rc.turnStart = time.Now().Add(-10 * time.Second)
+				rc.thinkingEnd = time.Now().Add(-8 * time.Second)
+				rc.toolCount = 2
+				rc.toolTotalDuration = 5 * time.Second
+				rc.turnEnd = time.Now()
+				rc.streamText = "result text"
+				rc.contextUsed = 53000
+				rc.contextSize = 200000
+			},
+			wantContains: []string{
+				"result text",
+				"thinking",
+				"2 tools",
+				"5s",
+				"total",
+				"10s",
+				"ctx 26%",
+			},
 		},
 		{
 			name:     "finish footer",
