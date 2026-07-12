@@ -119,6 +119,11 @@ func (p *Platform) StreamEvent(ctx context.Context, replyCtx any, ev core.Stream
 			rc.contextUsed = ev.Status.ContextUsed
 			rc.contextSize = ev.Status.ContextSize
 		}
+	case "usage":
+		if ev.Status.ContextSize > 0 {
+			rc.contextUsed = ev.Status.ContextUsed
+			rc.contextSize = ev.Status.ContextSize
+		}
 	case "thinking":
 		rc.thinkingText += ev.Text
 		if ev.Status.ContextSize > 0 {

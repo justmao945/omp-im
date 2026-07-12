@@ -362,6 +362,7 @@ func (s *Session) Respond(ctx context.Context, prompt string, images []core.Imag
 			}
 			if used, size := extractUsageUpdate(params); size > 0 {
 				s.setUsageUpdate(used, size)
+				emit(core.StreamEvent{Type: "usage", Status: s.Status()})
 			}
 			if hasToolCall(params) {
 				cmd := toolCallCommand(params)
