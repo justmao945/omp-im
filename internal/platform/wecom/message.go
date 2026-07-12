@@ -12,11 +12,17 @@ type inboundMessage struct {
 	text     string // concatenated text content
 	reqID    string // original frame req_id, used for passive replies
 
-	// images are downloaded/decrypted media URLs. Not implemented in MVP.
+	// images are decrypted image attachments from this message.
 	images []imageAttachment
 }
 
 type imageAttachment struct {
+	url    string
+	aeskey string
+}
+
+// imageContent describes a single image found in a mixed message.
+type imageContent struct {
 	url    string
 	aeskey string
 }
@@ -82,8 +88,13 @@ func parseInboundMessage(frame *wsFrame) *inboundMessage {
 		if text, ok := body["text"].(map[string]interface{}); ok {
 			m.text, _ = text["content"].(string)
 		}
+	case "image":
+		if img := parseImageContent(body["image"]); img != nil {
+			m.images = append(m.images, *img)
+		}
+		m.text = "[image]"
 	case "mixed":
-		m.text = extractMixedText(body)
+		m.text, m.images = parseMixedBody(body)
 	case "voice":
 		if voice, ok := body["voice"].(map[string]interface{}); ok {
 			m.text, _ = voice["content"].(string)
@@ -91,6 +102,54 @@ func parseInboundMessage(frame *wsFrame) *inboundMessage {
 	}
 
 	return m
+}
+
+func parseImageContent(v any) *imageAttachment {
+	img, ok := v.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	url, _ := img["url"].(string)
+	if url == "" {
+		return nil
+	}
+	aeskey, _ := img["aeskey"].(string)
+	return &imageAttachment{url: url, aeskey: aeskey}
+}
+
+func parseMixedBody(body map[string]interface{}) (string, []imageAttachment) {
+	var textParts []string
+	var images []imageAttachment
+	if mixed, ok := body["mixed"].(map[string]interface{}); ok {
+		if items, ok := mixed["msg_item"].([]interface{}); ok {
+			for _, item := range items {
+				itemMap, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				itemType, _ := itemMap["type"].(string)
+				if itemType == "" {
+					itemType, _ = itemMap["msgtype"].(string)
+				}
+				switch itemType {
+				case "text":
+					if t, ok := itemMap["text"].(map[string]interface{}); ok {
+						if content, ok := t["content"].(string); ok && content != "" {
+							textParts = append(textParts, content)
+						}
+					}
+				case "image":
+					if img := parseImageContent(itemMap["image"]); img != nil {
+						images = append(images, *img)
+					}
+				}
+			}
+		}
+	}
+	if len(images) > 0 && len(textParts) == 0 {
+		textParts = append(textParts, "[image]")
+	}
+	return strings.Join(textParts, "\n"), images
 }
 
 // extractMixedText concatenates text parts from a mixed message body.

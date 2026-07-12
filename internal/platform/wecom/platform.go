@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ type Platform struct {
 	cfg       *config
 	wsClient  *wsClient
 	handler   core.MessageHandler
+	httpClient *http.Client
 
 	startOnce sync.Once
 	stopOnce  sync.Once
@@ -31,7 +33,10 @@ func New(opts map[string]any) (*Platform, error) {
 		return nil, err
 	}
 
-	p := &Platform{cfg: cfg}
+	p := &Platform{
+		cfg:        cfg,
+		httpClient: &http.Client{Timeout: 30 * time.Second},
+	}
 	p.wsClient = newWSClient(cfg, p.handleFrame)
 	return p, nil
 }
@@ -110,11 +115,15 @@ func (p *Platform) handleFrame(frame *wsFrame) {
 	}
 
 	if msg.text == "" {
-		if msg.msgtype != "text" && msg.msgtype != "mixed" && msg.msgtype != "voice" {
+		if msg.msgtype != "text" && msg.msgtype != "mixed" && msg.msgtype != "voice" && msg.msgtype != "image" {
 			slog.Debug("wecom: unsupported message type", "msgtype", msg.msgtype)
 			return
 		}
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	images := p.collectInboundImages(ctx, msg)
 
 	sessionKey := fmt.Sprintf("wecom:%s", msg.chatid)
 	coreMsg := &core.Message{
@@ -124,6 +133,7 @@ func (p *Platform) handleFrame(frame *wsFrame) {
 		ChannelID:  msg.chatid,
 		UserID:     msg.from,
 		Content:    msg.text,
+		Images:     images,
 		ReplyCtx:   &replyContext{chatid: msg.chatid, chattype: msg.chattype, reqID: msg.reqID},
 	}
 
