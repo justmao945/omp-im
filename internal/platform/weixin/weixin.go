@@ -420,8 +420,14 @@ func (p *Platform) dispatchInbound(ctx context.Context, m *weixinMessage, h core
 		return
 	}
 
+	msgID := fmt.Sprintf("%d", m.MessageID)
+	if m.MessageID == 0 {
+		msgID = randomHex(8)
+	}
+
 	body := bodyFromItemList(m.ItemList)
 	images := p.collectInboundImages(ctx, m.ItemList)
+	slog.Debug("weixin: dispatching inbound", "from", from, "msg_id", msgID, "item_count", len(m.ItemList), "body_len", len(body), "images", len(images))
 	if strings.TrimSpace(body) == "" && len(images) == 0 {
 		return
 	}
@@ -449,10 +455,6 @@ func (p *Platform) dispatchInbound(ctx context.Context, m *weixinMessage, h core
 	p.dedupMu.Unlock()
 
 	rc := &replyContext{peerUserID: from, contextToken: strings.TrimSpace(m.ContextToken)}
-	msgID := fmt.Sprintf("%d", m.MessageID)
-	if m.MessageID == 0 {
-		msgID = randomHex(8)
-	}
 
 	h(p, &core.Message{
 		SessionKey: sessionKeyPrefix + from,

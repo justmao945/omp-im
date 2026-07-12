@@ -137,6 +137,33 @@ func downloadPlainCDN(ctx context.Context, client *http.Client, cdnBase, encPara
 	return fetchCdnBytes(ctx, client, u, label)
 }
 
+// downloadPlainByURL downloads a plain (non-encrypted) image from an explicit URL.
+func downloadPlainByURL(ctx context.Context, client *http.Client, rawURL, label string) ([]byte, error) {
+	if client == nil {
+		client = http.DefaultClient
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("%s: new request: %w", label, err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%s: get: %w", label, err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxWeixinMediaBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("%s: read: %w", label, err)
+	}
+	if len(body) > maxWeixinMediaBytes {
+		return nil, fmt.Errorf("%s: body exceeds %d bytes", label, maxWeixinMediaBytes)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s: http %d: %s", label, resp.StatusCode, truncateForLog(body, 256))
+	}
+	return body, nil
+}
+
 func md5Hex(b []byte) string {
 	h := md5.Sum(b)
 	return hex.EncodeToString(h[:])

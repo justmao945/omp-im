@@ -47,6 +47,9 @@ type cdnMedia struct {
 	EncryptQueryParam string `json:"encrypt_query_param,omitempty"`
 	AESKey            string `json:"aes_key,omitempty"`
 	EncryptType       int    `json:"encrypt_type,omitempty"`
+	URL               string `json:"url,omitempty"`
+	MediaURL          string `json:"media_url,omitempty"`
+	DownloadParam     string `json:"download_param,omitempty"`
 }
 
 type imageItem struct {

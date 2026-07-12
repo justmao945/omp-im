@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -11,25 +12,50 @@ import (
 	"github.com/justmao945/omp-im/internal/core"
 )
 
-// imageDecryptMaterial extracts the CDN encrypted query param and AES key from an image item.
-func imageDecryptMaterial(img *imageItem) (encParam, aesKeyBase64 string, ok bool) {
-	if img == nil || img.Media == nil {
-		return "", "", false
+// imageDecryptMaterial extracts the CDN encrypted query param or plain URL and AES key from an image item.
+func imageDecryptMaterial(img *imageItem) (encParam, aesKeyBase64 string, plainURL string, ok bool) {
+	if img == nil {
+		return "", "", "", false
 	}
-	encParam = strings.TrimSpace(img.Media.EncryptQueryParam)
-	if encParam == "" {
-		return "", "", false
+
+	media := img.Media
+	if media == nil {
+		media = img.ThumbMedia
 	}
-	if hx := strings.TrimSpace(img.AESKeyHex); hx != "" {
-		raw, err := hex.DecodeString(hx)
-		if err == nil && len(raw) == 16 {
-			return encParam, base64.StdEncoding.EncodeToString(raw), true
+	if media == nil {
+		return "", "", "", false
+	}
+
+	encParam = strings.TrimSpace(media.EncryptQueryParam)
+	aesKeyBase64 = strings.TrimSpace(media.AESKey)
+	plainURL = strings.TrimSpace(firstNonEmpty(media.URL, media.MediaURL, media.DownloadParam))
+
+	if encParam != "" {
+		if hx := strings.TrimSpace(img.AESKeyHex); hx != "" {
+			raw, err := hex.DecodeString(hx)
+			if err == nil && len(raw) == 16 {
+				return encParam, base64.StdEncoding.EncodeToString(raw), "", true
+			}
+		}
+		if k := strings.TrimSpace(media.AESKey); k != "" {
+			return encParam, k, "", true
+		}
+		// We have an encrypt_param but no key: try downloading without decryption.
+		return encParam, "", "", true
+	}
+	if plainURL != "" {
+		return "", "", plainURL, true
+	}
+	return "", "", "", false
+}
+
+func firstNonEmpty(ss ...string) string {
+	for _, s := range ss {
+		if strings.TrimSpace(s) != "" {
+			return s
 		}
 	}
-	if k := strings.TrimSpace(img.Media.AESKey); k != "" {
-		return encParam, k, true
-	}
-	return encParam, "", false
+	return ""
 }
 
 // collectInboundImages downloads and decrypts image attachments from Weixin CDN.
@@ -48,28 +74,36 @@ func (p *Platform) collectInboundImages(ctx context.Context, items []messageItem
 	seenEnc := make(map[string]struct{})
 	var images []core.ImageAttachment
 
-	for _, it := range items {
+	for i, it := range items {
 		if it.Type != messageItemImage {
 			continue
 		}
-		enc, keyB64, hasKey := imageDecryptMaterial(it.ImageItem)
-		if enc == "" {
+		if it.ImageItem == nil {
+			slog.Debug("weixin: inbound image item has nil ImageItem", "index", i)
 			continue
 		}
-		if _, ok := seenEnc[enc]; ok {
+		enc, keyB64, plainURL, ok := imageDecryptMaterial(it.ImageItem)
+		if !ok {
+			slog.Debug("weixin: inbound image item has no CDN reference", "index", i, "media", fmt.Sprintf("%+v", it.ImageItem.Media))
 			continue
 		}
-		seenEnc[enc] = struct{}{}
+		ref := firstNonEmpty(enc, plainURL)
+		if _, dup := seenEnc[ref]; dup {
+			continue
+		}
+		seenEnc[ref] = struct{}{}
 
 		var buf []byte
 		var err error
-		if hasKey && keyB64 != "" {
+		if plainURL != "" {
+			buf, err = downloadPlainByURL(dlCtx, client, plainURL, "weixin inbound image")
+		} else if keyB64 != "" {
 			buf, err = downloadAndDecryptCDN(dlCtx, client, base, enc, keyB64, "weixin inbound image")
 		} else {
 			buf, err = downloadPlainCDN(dlCtx, client, base, enc, "weixin inbound image")
 		}
 		if err != nil {
-			slog.Warn("weixin: inbound image CDN failed", "error", err)
+			slog.Warn("weixin: inbound image CDN failed", "index", i, "error", err)
 			continue
 		}
 		mt := detectImageMime(buf)
