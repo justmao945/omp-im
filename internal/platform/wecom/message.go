@@ -42,11 +42,12 @@ type imageContent struct {
 
 // replyContext stores the data needed to reply to a specific inbound message.
 type replyContext struct {
-	chatid   string
-	chattype string
-	reqID    string
-	aibotid  string // robot id, used to strip @-mentions in groups
-	streamID string // reused across stream chunks for a single turn
+	chatid     string
+	chattype   string
+	reqID      string
+	aibotid    string // robot id, used to strip @-mentions in groups
+	streamID   string // reused across stream chunks for a single turn
+	streamText string // accumulated text for WeCom stream refresh mode
 }
 
 // wsFrame is the top-level envelope received over the WebSocket.

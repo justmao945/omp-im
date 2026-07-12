@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -39,8 +40,10 @@ func (p *Platform) sendTextReply(rc *replyContext, text string) error {
 }
 
 // StreamReply implements core.StreamReplyer. It sends a single stream chunk for
-// the current turn. The first call initializes the shared stream id, and the
-// finished chunk signals the end of the turn.
+// the current turn. The first call initializes the shared stream id, and
+// the finished chunk signals the end of the turn. WeCom stream messages expect
+// the content field to be the cumulative text so far, not a delta, so we
+// accumulate incoming deltas in the reply context.
 func (p *Platform) StreamReply(ctx context.Context, replyCtx any, delta string, finished bool) error {
 	rc, ok := replyCtx.(*replyContext)
 	if !ok {
@@ -52,12 +55,24 @@ func (p *Platform) StreamReply(ctx context.Context, replyCtx any, delta string, 
 	if rc.streamID == "" {
 		rc.streamID = generateReqID()
 	}
+
+	// ACP chunks are deltas, but the WeCom stream protocol expects each frame
+	// to contain the full message content so far (refresh mode). Detect if the
+	// agent already sent cumulative text and fall back to appending raw deltas.
+	if rc.streamText == "" {
+		rc.streamText = delta
+	} else if strings.HasPrefix(delta, rc.streamText) {
+		rc.streamText = delta
+	} else {
+		rc.streamText += delta
+	}
+
 	body := map[string]interface{}{
 		"msgtype": "stream",
 		"stream": map[string]interface{}{
 			"id":      rc.streamID,
 			"finish":  finished,
-			"content": delta,
+			"content": rc.streamText,
 		},
 	}
 	if rc.reqID != "" {

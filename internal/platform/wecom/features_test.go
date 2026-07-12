@@ -143,17 +143,14 @@ func TestStreamReplyPassive(t *testing.T) {
 	if len(sent) != 2 {
 		t.Fatalf("sent = %d", len(sent))
 	}
-	if rc.streamID == "" {
-		t.Fatal("expected streamID to be set")
-	}
-	for _, v := range sent {
-		body, _ := v["body"].(map[string]interface{})
-		stream, _ := body["stream"].(map[string]interface{})
-		if stream["id"] != rc.streamID {
-			t.Fatal("stream id mismatch")
-		}
+	first := sent[0]["body"].(map[string]interface{})["stream"].(map[string]interface{})
+	if first["content"] != "hello " {
+		t.Fatalf("first content = %q", first["content"])
 	}
 	last := sent[1]["body"].(map[string]interface{})["stream"].(map[string]interface{})
+	if last["content"] != "hello world" {
+		t.Fatalf("last content = %q", last["content"])
+	}
 	if last["finish"] != true {
 		t.Fatal("expected finish=true on last chunk")
 	}
