@@ -60,7 +60,7 @@ Leave `platforms[0].options.token` empty and run the login subcommand:
 omp-im weixin login
 ```
 
-This fetches a QR code from iLink, saves it to `~/.omp-im/weixin/default/login-qr.png`, prints the image path in the terminal, and tries to open it with the default image viewer. Scan the code with WeChat, confirm on your phone, and the login token is persisted to `~/.omp-im/weixin/default/session.json`. After that, start the server normally:
+This fetches a QR code from iLink, prints an ASCII QR code in the terminal, and also saves the image to `~/.omp-im/weixin/default/login-qr.png` as a fallback. Scan the terminal QR code with WeChat, confirm on your phone, and the login token is persisted to `~/.omp-im/weixin/default/session.json`. After that, start the server normally:
 
 ```bash
 omp-im

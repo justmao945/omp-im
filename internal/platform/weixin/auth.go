@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
+
+	qrcode "github.com/skip2/go-qrcode"
 )
 
 const (
@@ -114,18 +114,19 @@ func performQRLogin(ctx context.Context, client *apiClient, stateDir string) (*s
 
 	qrFile := filepath.Join(stateDir, defaultQRFileName)
 	if err := saveQRCodeImage(qrFile, qrResp.QRCodeImgContent); err != nil {
-		return nil, fmt.Errorf("weixin: failed to save QR code image: %w", err)
+		slog.Warn("weixin: failed to save QR code image", "error", err)
 	}
+
 	fmt.Printf("\n=================================================\n")
-	fmt.Printf("请用微信扫描以下二维码登录：\n")
-	fmt.Printf("  图片: %s\n", qrFile)
-	fmt.Printf("  内容: %s\n", qrResp.QRCode)
+	fmt.Printf("请用微信扫描下方二维码登录（或打开图片 %s）：\n", qrFile)
 	fmt.Printf("=================================================\n\n")
 
-	if opened := tryOpenImage(qrFile); opened {
-		fmt.Println("已尝试自动打开二维码图片。")
+	qr, err := qrcode.New(qrResp.QRCode, qrcode.Low)
+	if err == nil {
+		fmt.Println(qr.ToSmallString(false))
+		fmt.Println()
 	} else {
-		fmt.Println("请手动打开上面的图片文件，用微信扫描。")
+		fmt.Printf("  内容: %s\n\n", qrResp.QRCode)
 	}
 
 	slog.Info("weixin: waiting for QR code scan", "deadline", qrLoginDeadline)
@@ -207,35 +208,6 @@ func normalizeBaseURL(baseURL string) string {
 		return defaultBaseURL
 	}
 	return strings.TrimRight(baseURL, "/")
-}
-
-// tryOpenImage attempts to open the QR image with the system's default image viewer.
-func tryOpenImage(path string) bool {
-	var cmd string
-	var args []string
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = "open"
-		args = []string{path}
-	case "linux":
-		cmd = "xdg-open"
-		args = []string{path}
-	case "windows":
-		cmd = "cmd"
-		args = []string{"/c", "start", path}
-	default:
-		return false
-	}
-	if _, err := exec.LookPath(cmd); err != nil {
-		return false
-	}
-	c := exec.Command(cmd, args...)
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
-	if err := c.Start(); err != nil {
-		return false
-	}
-	return true
 }
 
 // isTimeoutError treats HTTP context deadlines as normal long-poll timeouts.
