@@ -2,6 +2,8 @@ package omp
 
 import (
 	"testing"
+
+	"github.com/justmao945/omp-im/internal/core"
 )
 
 func TestResolveOMPCommand(t *testing.T) {
@@ -43,4 +45,32 @@ func TestExtractConfigOptionUpdateIgnoresOtherUpdates(t *testing.T) {
 		t.Fatalf("got %d options, want 0", len(opts))
 	}
 }
+
+func TestModelPreservedAcrossTurnStatusReset(t *testing.T) {
+	s := &acpSession{
+		agentStatus: core.AgentStatus{State: "idle", Model: "kimi-code/kimi-for-coding"},
+	}
+	s.startTurnStatus()
+	if s.agentStatus.Model != "kimi-code/kimi-for-coding" {
+		t.Fatalf("startTurnStatus dropped model: %q", s.agentStatus.Model)
+	}
+	s.resetStatus()
+	if s.agentStatus.Model != "kimi-code/kimi-for-coding" {
+		t.Fatalf("resetStatus dropped model: %q", s.agentStatus.Model)
+	}
+}
+
+func TestModelPreservedOnConfigOptionUpdate(t *testing.T) {
+	s := &acpSession{
+		agentStatus: core.AgentStatus{State: "idle", Model: "old-model"},
+	}
+	opts := []configOption{
+		{ID: "model", Category: "model", CurrentValue: "new-model"},
+	}
+	s.setModelFromConfigOptions(opts)
+	if s.agentStatus.Model != "new-model" {
+		t.Fatalf("model = %q, want new-model", s.agentStatus.Model)
+	}
+}
+
 

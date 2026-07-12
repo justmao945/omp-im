@@ -427,7 +427,9 @@ func (s *acpSession) History() []core.HistoryEntry {
 func (s *acpSession) resetStatus() {
 	s.statusMu.Lock()
 	defer s.statusMu.Unlock()
+	model := s.agentStatus.Model
 	s.agentStatus = core.AgentStatus{State: "idle"}
+	s.agentStatus.Model = model
 	s.turnStart = time.Time{}
 	s.toolCount = 0
 	s.currentTool = time.Time{}
@@ -437,7 +439,9 @@ func (s *acpSession) resetStatus() {
 func (s *acpSession) startTurnStatus() {
 	s.statusMu.Lock()
 	defer s.statusMu.Unlock()
+	model := s.agentStatus.Model
 	s.agentStatus = core.AgentStatus{State: "thinking"}
+	s.agentStatus.Model = model
 	s.turnStart = time.Now()
 	s.toolCount = 0
 	s.currentTool = time.Time{}
