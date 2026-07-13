@@ -9,7 +9,7 @@ Send these as messages in any supported IM conversation.
 | `/proj` | Show the current project and available projects. |
 | `/proj <name>` | Switch to the named project. The current session is closed; the next message starts a new session in the new working directory. |
 | `/p` | Show current agent, project, active model, and context usage. |
-| `/esc` | Cancel the currently generating agent reply. |
+| `/esc` | Cancel the currently generating reply. Sends `session/cancel` so the agent stops immediately instead of burning tokens. |
 | `/new` | Close the current session and start a fresh conversation on the next message. |
 | `/ls` | List the current agent's own historical sessions for the current project's working directory. |
 | `/sw <n or id>` | Switch to one of the sessions listed by `/ls` (by 1-based index or session-id prefix). The next message resumes that conversation. |
