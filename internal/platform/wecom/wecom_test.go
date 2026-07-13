@@ -1,7 +1,10 @@
 package wecom
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -70,6 +73,32 @@ func TestParseInboundMessage(t *testing.T) {
 	}
 	if msg.msgid != "m1" || msg.chatid != "g1" || msg.chattype != "group" || msg.from != "u1" || msg.text != "hello" {
 		t.Fatalf("message mismatch: %+v", msg)
+	}
+}
+
+func TestParseInboundMessageIncludesQuotedText(t *testing.T) {
+	frame := &wsFrame{
+		Cmd: "aibot_msg_callback",
+		Body: map[string]interface{}{
+			"msgid":    "m-quote",
+			"chatid":   "g1",
+			"chattype": "group",
+			"msgtype":  "text",
+			"from":     map[string]interface{}{"userid": "u1"},
+			"text":     map[string]interface{}{"content": "what about this?"},
+			"quote": map[string]interface{}{
+				"msgtype": "text",
+				"text":    map[string]interface{}{"content": "the referenced message"},
+			},
+		},
+	}
+	msg := parseInboundMessage(frame)
+	if msg == nil {
+		t.Fatal("expected message")
+	}
+	want := "what about this?\n\n[quoted message]\nthe referenced message"
+	if msg.text != want {
+		t.Fatalf("text = %q, want %q", msg.text, want)
 	}
 }
 
@@ -179,10 +208,33 @@ func TestSessionKeyPerChat(t *testing.T) {
 	}
 }
 
+func TestHandleFrameLogsReceivedGroupMessage(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	p := &Platform{cfg: &config{}}
+	p.handleFrame(&wsFrame{
+		Cmd: "aibot_msg_callback",
+		Body: map[string]interface{}{
+			"msgid":    "m-log",
+			"chatid":   "group-log",
+			"chattype": "group",
+			"msgtype":  "text",
+			"from":     map[string]interface{}{"userid": "u1"},
+			"text":     map[string]interface{}{"content": "hello"},
+		},
+	})
+	if !strings.Contains(logs.String(), "wecom: received group message") {
+		t.Fatalf("logs = %q, want received-group-message entry", logs.String())
+	}
+}
+
 func TestAllowFromGroup(t *testing.T) {
 	cfg, _ := parseConfig(map[string]any{
-		"bot_id":         "b",
-		"secret":         "s",
+		"bot_id":           "b",
+		"secret":           "s",
 		"group_allow_from": "g1,g2",
 	})
 	p := &Platform{cfg: cfg}

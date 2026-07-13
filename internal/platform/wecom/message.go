@@ -73,18 +73,18 @@ type replyContext struct {
 	streamBody []streamSection
 
 	// streaming state
-	thinkingText     string
-	thinkingEnd      time.Time
-	toolName         string
-	toolStart        time.Time
-	toolCount        int
+	thinkingText      string
+	thinkingEnd       time.Time
+	toolName          string
+	toolStart         time.Time
+	toolCount         int
 	toolTotalDuration time.Duration
-	toolHistory      []toolRecord
-	turnStart        time.Time
-	turnEnd          time.Time
-	lastRender       time.Time
-	contextUsed      int
-	contextSize      int
+	toolHistory       []toolRecord
+	turnStart         time.Time
+	turnEnd           time.Time
+	lastRender        time.Time
+	contextUsed       int
+	contextSize       int
 
 	stopTicker func() // stops the per-second status-line ticker
 	finished   bool   // turn has ended; stop further renders
@@ -141,35 +141,17 @@ func parseInboundMessage(frame *wsFrame) *inboundMessage {
 		aibotid:  aibotid,
 	}
 
-	switch msgtype {
-	case "text":
-		if text, ok := body["text"].(map[string]interface{}); ok {
-			m.text, _ = text["content"].(string)
-			m.text = stripWeComAtMentions(m.text, aibotid)
-		}
-	case "file":
-		if f := parseFileContent(body["file"]); f != nil {
-			m.files = append(m.files, *f)
-			m.text = "[file: " + f.filename + "]"
-		}
-	case "video":
-		if f := parseFileContent(body["video"]); f != nil {
-			m.files = append(m.files, *f)
-			m.text = "[video: " + f.filename + "]"
-		}
-	case "image":
-		if img := parseImageContent(body["image"]); img != nil {
-			m.images = append(m.images, *img)
-		}
-		m.text = "[image]"
-	case "mixed":
-		m.text, m.images, m.files = parseMixedBody(body)
-		m.text = stripWeComAtMentions(m.text, aibotid)
-	case "voice":
-		if voice, ok := body["voice"].(map[string]interface{}); ok {
-			m.text, _ = voice["content"].(string)
-			m.text = stripWeComAtMentions(m.text, aibotid)
-		}
+	text, images, files := parseMessageContent(msgtype, body, aibotid)
+	m.text = text
+	m.images = images
+	m.files = files
+
+	if quote, ok := body["quote"].(map[string]interface{}); ok {
+		quoteType, _ := quote["msgtype"].(string)
+		quoteText, quoteImages, quoteFiles := parseMessageContent(quoteType, quote, aibotid)
+		m.text = appendQuotedMessage(m.text, quoteText)
+		m.images = append(m.images, quoteImages...)
+		m.files = append(m.files, quoteFiles...)
 	}
 
 	slog.Debug("wecom: parsed inbound message", "msgtype", msgtype, "text_len", len(m.text), "images", len(m.images), "from", fromUser, "aibotid", aibotid)
@@ -177,6 +159,50 @@ func parseInboundMessage(frame *wsFrame) *inboundMessage {
 	return m
 }
 
+// parseMessageContent extracts the text and attachments from a WeCom message
+// body. A quoted message uses the same content schema as its parent message.
+func parseMessageContent(msgtype string, body map[string]interface{}, aibotid string) (string, []imageAttachment, []fileAttachment) {
+	switch msgtype {
+	case "text":
+		if text, ok := body["text"].(map[string]interface{}); ok {
+			content, _ := text["content"].(string)
+			return stripWeComAtMentions(content, aibotid), nil, nil
+		}
+	case "file":
+		if f := parseFileContent(body["file"]); f != nil {
+			return "[file: " + f.filename + "]", nil, []fileAttachment{*f}
+		}
+	case "video":
+		if f := parseFileContent(body["video"]); f != nil {
+			return "[video: " + f.filename + "]", nil, []fileAttachment{*f}
+		}
+	case "image":
+		if img := parseImageContent(body["image"]); img != nil {
+			return "[image]", []imageAttachment{*img}, nil
+		}
+		return "[image]", nil, nil
+	case "mixed":
+		text, images, files := parseMixedBody(body)
+		return stripWeComAtMentions(text, aibotid), images, files
+	case "voice":
+		if voice, ok := body["voice"].(map[string]interface{}); ok {
+			content, _ := voice["content"].(string)
+			return stripWeComAtMentions(content, aibotid), nil, nil
+		}
+	}
+	return "", nil, nil
+}
+
+func appendQuotedMessage(text, quote string) string {
+	quote = strings.TrimSpace(quote)
+	if quote == "" {
+		return text
+	}
+	if text == "" {
+		return "[quoted message]\n" + quote
+	}
+	return text + "\n\n[quoted message]\n" + quote
+}
 func parseImageContent(v any) *imageAttachment {
 	img, ok := v.(map[string]interface{})
 	if !ok {

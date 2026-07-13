@@ -14,9 +14,9 @@ import (
 
 // Platform implements core.Platform for WeCom AI bot via WebSocket long connection.
 type Platform struct {
-	cfg       *config
-	wsClient  *wsClient
-	handler   core.MessageHandler
+	cfg        *config
+	wsClient   *wsClient
+	handler    core.MessageHandler
 	httpClient *http.Client
 
 	startOnce sync.Once
@@ -156,6 +156,10 @@ func (p *Platform) handleFrame(frame *wsFrame) {
 			slog.Debug("wecom: unsupported message type", "msgtype", msg.msgtype)
 			return
 		}
+	}
+
+	if msg.chattype == "group" {
+		slog.Info("wecom: received group message", "message_id", msg.msgid, "chatid", msg.chatid, "from", msg.from, "msgtype", msg.msgtype)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
