@@ -42,12 +42,24 @@ Two ACP methods are used, in order of preference:
 
 If neither is supported, the conversation starts fresh with `session/new`.
 
-Session IDs are saved when a session is created and removed when the user explicitly starts a new session (`/new`) or switches agent/project.
+Session IDs are saved when a session is created and removed when the user explicitly starts a new session (`/new`) or switches agent/project. The `/sw <n or id>` command sets a previously persisted agent session as the resume target so the next message resumes it instead of starting fresh — it does not issue an ACP call itself; it closes the live session and reuses the resume path above on the next turn.
+
+## Session listing
+
+`/ls` enumerates historical sessions from the native CLI's own on-disk store (not via an ACP method). It filters sessions whose working directory matches the current project's `work_dir` and returns up to 20, sorted by most recent activity:
+
+| Agent | Store location | Title source |
+| --- | --- | --- |
+| `omp` | `~/.omp/agent/sessions/<encoded-cwd>/*.jsonl` | `type:title` line |
+| `claude` (Claude Code) | `~/.claude/projects/<encoded-cwd>/*.jsonl` | first user message |
+| `codex` | `~/.codex/sessions/**/*.jsonl` | `~/.codex/session_index.jsonl` `thread_name` |
+
+`/sw <n>` resumes the n-th session from the last `/ls` output; `/sw <id>` matches by session-id prefix. The selected id is persisted as the resume target, and the next message resumes it through `session/resume` or `session/load` as described above. The current agent and project selection are preserved.
 
 ## References
 
 - [ACP overview](https://agentclientprotocol.com/protocol/v1/overview)
 - [ACP session setup](https://agentclientprotocol.com/protocol/v1/session-setup)
 - [Resuming existing sessions](https://agentclientprotocol.com/rfds/session-resume)
-- [Session list](https://agentclientprotocol.com/rfds/session-list)
+- [Session list](https://agentclientprotocol.com/rfds/session-list) — protocol-level method; `omp-im` does not use it. `/ls` reads each CLI's own on-disk store instead.
 - [Closing active sessions](https://agentclientprotocol.com/rfds/session-close)
