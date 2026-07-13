@@ -6,7 +6,7 @@
 
 ```json
 {
-  "agents": ["omp"],
+  "agents": ["omp", "claude", "codex"],
   "projects": [
     { "name": "default", "work_dir": "/path/to/project" }
   ],
@@ -31,7 +31,7 @@
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `agents` | `[]string` | Built-in agent names to enable. Only `omp` is supported today. |
+| `agents` | `[]string` | Built-in agent names to enable: `omp`, `claude`, and `codex`. Claude and Codex require their matching ACP adapters to be installed. |
 | `projects` | `[]ProjectConfig` | Named working directories passed to the agent. |
 | `default.agent` | `string` | Default agent for new conversations. |
 | `default.project` | `string` | Default project for new conversations. |

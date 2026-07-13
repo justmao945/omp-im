@@ -24,6 +24,11 @@ type Config struct {
 	Args             []string
 	WorkDir          string
 	AutoApproveTools bool
+	// AuthMethod is sent to authenticate during initialization. Empty leaves
+	// authentication to the spawned agent's own CLI credentials.
+	AuthMethod string
+	// InstallHint explains how to install Command when it is unavailable.
+	InstallHint string
 }
 
 // Session is a single ACP conversation session with a local agent.
@@ -32,20 +37,20 @@ type Session struct {
 	sessionKey string
 	tr         *Transport
 
-	mu            sync.Mutex
-	turnMu        sync.Mutex
-	statusMu      sync.Mutex
-	agentStatus   core.AgentStatus
-	turnStart     time.Time
-	toolCount     int
-	currentTool   time.Time
-	sessionID     string
-	resumeSessionID string
-	history       []historyEntry
-	currentStatus string
-	lastActivityAt time.Time
-	OnClose       func()
-	capLoadSession bool
+	mu               sync.Mutex
+	turnMu           sync.Mutex
+	statusMu         sync.Mutex
+	agentStatus      core.AgentStatus
+	turnStart        time.Time
+	toolCount        int
+	currentTool      time.Time
+	sessionID        string
+	resumeSessionID  string
+	history          []historyEntry
+	currentStatus    string
+	lastActivityAt   time.Time
+	OnClose          func()
+	capLoadSession   bool
 	capResumeSession bool
 }
 
@@ -186,9 +191,9 @@ func (s *Session) handshake(ctx context.Context) error {
 		return fmt.Errorf("acp initialize: %w", err)
 	}
 	var initOut struct {
-		ProtocolVersion    int `json:"protocolVersion"`
-		AgentCapabilities  struct {
-			LoadSession bool `json:"loadSession"`
+		ProtocolVersion   int `json:"protocolVersion"`
+		AgentCapabilities struct {
+			LoadSession         bool `json:"loadSession"`
 			SessionCapabilities struct {
 				Resume json.RawMessage `json:"resume"`
 			} `json:"sessionCapabilities"`
@@ -201,11 +206,12 @@ func (s *Session) handshake(ctx context.Context) error {
 	s.capResumeSession = len(initOut.AgentCapabilities.SessionCapabilities.Resume) > 0
 	slog.Debug("acp initialized", "protocol", initOut.ProtocolVersion, "load_session", s.capLoadSession, "resume_session", s.capResumeSession)
 
-	// Authenticate if the agent advertises auth methods.
-	// The "agent" method uses local credentials already configured under ~/.omp.
-	// We attempt it unconditionally because many ACP agents require it.
-	if _, err := s.tr.call(ctx, "authenticate", map[string]any{"methodId": "agent"}); err != nil {
-		slog.Debug("acp authenticate skipped", "error", err)
+	// Some ACP adapters rely on the local CLI's own login state and do not need
+	// an ACP authenticate request.
+	if s.cfg.AuthMethod != "" {
+		if _, err := s.tr.call(ctx, "authenticate", map[string]any{"methodId": s.cfg.AuthMethod}); err != nil {
+			slog.Debug("acp authenticate skipped", "method", s.cfg.AuthMethod, "error", err)
+		}
 	}
 
 	// If we have a previously persisted session ID, try to resume it first.
@@ -235,7 +241,7 @@ func (s *Session) handshake(ctx context.Context) error {
 		return fmt.Errorf("acp session/new: %w", err)
 	}
 	var sn struct {
-		SessionID    string         `json:"sessionId"`
+		SessionID     string         `json:"sessionId"`
 		ConfigOptions []configOption `json:"configOptions"`
 	}
 	if err := json.Unmarshal(newRes, &sn); err != nil {
@@ -569,7 +575,7 @@ func (s *Session) Close() error {
 	if s.tr == nil {
 		return nil
 	}
-	err := s.tr.close()
+	err := s.tr.Close()
 	if s.OnClose != nil {
 		s.OnClose()
 	}
@@ -834,7 +840,7 @@ func toolCallPath(params json.RawMessage) string {
 		return ""
 	}
 	var head struct {
-		RawInput json.RawMessage `json:"rawInput"`
+		RawInput  json.RawMessage `json:"rawInput"`
 		Locations []struct {
 			Path string `json:"path"`
 		} `json:"locations"`

@@ -1,13 +1,32 @@
 # ACP integration
 
-`omp-im` communicates with local agents using the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/). The protocol implementation lives in `internal/acp` and is transport-agnostic; `internal/agent/omp` is a thin launcher that starts the `omp acp` command and wires it to the ACP client.
+`omp-im` communicates with local agents using the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/). The protocol implementation lives in `internal/acp`; the local agent launchers live in `internal/agent`.
+
+## Built-in adapters
+
+`omp-im` starts a local ACP server for the selected agent. Install the adapters once on the host that runs `omp-im`:
+
+```bash
+npm install -g @agentclientprotocol/claude-agent-acp
+npm install -g @agentclientprotocol/codex-acp
+```
+
+The corresponding `/agent` names and commands are:
+
+| Agent | ACP command |
+| --- | --- |
+| `omp` | `omp acp` |
+| `claude` | `claude-agent-acp` |
+| `codex` | `codex-acp` |
+
+Claude Code and Codex authentication is handled by their own local CLI and credentials. `omp-im` does not issue an ACP authentication request for either adapter. If either adapter command is missing, session startup reports its exact installation command.
 
 ## Session lifecycle
 
 One ACP session is created per IM conversation. The session is keyed by the platform plus the user ID (`platform:userId`).
 
 1. `initialize` — protocol and capability exchange.
-2. `authenticate` — attempted unconditionally with the `agent` method (uses local `~/.omp` credentials).
+2. `authenticate` — sent only when the selected adapter requires an ACP auth method; local Claude and Codex adapters use their own CLI credentials.
 3. `session/new` — creates a new ACP session for a working directory.
 4. `session/prompt` — sends the user message to the agent.
 5. `session/update` — agent streams assistant text, tool calls, and attachments back to `omp-im`.

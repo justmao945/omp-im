@@ -9,14 +9,14 @@ import (
 )
 
 // SupportedAgentNames lists agent names that have built-in implementations.
-var SupportedAgentNames = []string{"omp"}
+var SupportedAgentNames = []string{"omp", "claude", "codex"}
 
 // Config is the top-level configuration.
 type Config struct {
-	Agents       []string        `json:"agents"`
-	Projects     []ProjectConfig `json:"projects"`
-	Defaults     DefaultsConfig  `json:"default"`
-	Platforms    []PlatformConfig `json:"platforms"`
+	Agents    []string         `json:"agents"`
+	Projects  []ProjectConfig  `json:"projects"`
+	Defaults  DefaultsConfig   `json:"default"`
+	Platforms []PlatformConfig `json:"platforms"`
 	// SessionStore is the path to a bbolt database that persists agent session IDs
 	// across restarts. If empty, it defaults to <user home>/.omp-im/sessions.db.
 	SessionStore string `json:"session_store,omitempty"`

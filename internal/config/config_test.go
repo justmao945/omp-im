@@ -56,13 +56,25 @@ func TestDefaultsFillEmpty(t *testing.T) {
 
 func TestValidateUnsupportedAgent(t *testing.T) {
 	cfg := &Config{
-		Agents:    []string{"claude"},
+		Agents:    []string{"unsupported"},
 		Projects:  []ProjectConfig{{Name: "p1"}},
-		Defaults:  DefaultsConfig{Agent: "claude", Project: "p1"},
+		Defaults:  DefaultsConfig{Agent: "unsupported", Project: "p1"},
 		Platforms: []PlatformConfig{{Type: "weixin"}},
 	}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected error for unsupported agent")
+	}
+}
+
+func TestValidateClaudeAndCodexAgents(t *testing.T) {
+	cfg := &Config{
+		Agents:    []string{"claude", "codex"},
+		Projects:  []ProjectConfig{{Name: "p1"}},
+		Defaults:  DefaultsConfig{Agent: "codex", Project: "p1"},
+		Platforms: []PlatformConfig{{Type: "weixin"}},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate(): %v", err)
 	}
 }
 

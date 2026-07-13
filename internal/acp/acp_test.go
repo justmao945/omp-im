@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -77,7 +78,7 @@ func TestModelDetectedOnRealSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new transport: %v", err)
 	}
-	defer tr.close()
+	defer tr.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -92,6 +93,19 @@ func TestModelDetectedOnRealSession(t *testing.T) {
 	t.Logf("status: %+v", st)
 	if st.Model == "" {
 		t.Fatalf("model not detected; status = %+v", st)
+	}
+}
+
+func TestNewTransportReportsInstallHintForMissingCommand(t *testing.T) {
+	_, err := NewTransport(Config{
+		Command:     "omp-im-test-missing-acp-command",
+		InstallHint: "install it with: npm install -g example-acp",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected missing command error")
+	}
+	if !strings.Contains(err.Error(), "npm install -g example-acp") {
+		t.Fatalf("error = %q, want installation guidance", err)
 	}
 }
 
@@ -167,7 +181,3 @@ func TestExtractAgentThought(t *testing.T) {
 		t.Fatalf("extractAgentText should not return thought text, got %q", got)
 	}
 }
-
-
-
-

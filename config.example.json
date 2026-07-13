@@ -1,5 +1,5 @@
 {
-  "agents": ["omp"],
+  "agents": ["omp", "claude", "codex"],
   "projects": [
     {
       "name": "default",

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -73,6 +74,9 @@ func NewTransport(cfg Config, serverReqHandler func(method string, params json.R
 	}
 
 	if err := cmd.Start(); err != nil {
+		if errors.Is(err, exec.ErrNotFound) && cfg.InstallHint != "" {
+			return nil, fmt.Errorf("acp agent command %q not found; %s", cfg.Command, cfg.InstallHint)
+		}
 		return nil, fmt.Errorf("acp start %s: %w", cfg.Command, err)
 	}
 
@@ -198,7 +202,8 @@ func (t *Transport) readLoop() {
 	t.closed.Store(true)
 }
 
-func (t *Transport) close() error {
+// Close terminates the ACP process and unblocks pending requests.
+func (t *Transport) Close() error {
 	if !t.closed.CompareAndSwap(false, true) {
 		return nil
 	}

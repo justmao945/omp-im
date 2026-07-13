@@ -52,9 +52,8 @@ All working data is stored under `~/.omp-im`.
 
 - `internal/core` — `Platform` / `Agent` / `Engine` abstractions, slash-command dispatch, and session persistence.
 - `internal/platform/weixin` — iLink long-poll inbound + media outbound; QR-code login.
-- `internal/agent` — factory for built-in agents (`omp`, future `claude` / `codex`).
+- `internal/agent` — factory and local ACP launchers for `omp`, `claude`, and `codex`.
 - `internal/acp` — generic [Agent Client Protocol](https://agentclientprotocol.com/) client: JSON-RPC over stdio, session lifecycle, and tool-call handling.
-- `internal/agent/omp` — thin launcher for the `omp acp` command; delegates to `internal/acp`.
 - `cmd/omp-im` — entry point.
 
 ## Weixin setup
