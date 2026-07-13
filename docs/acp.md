@@ -1,6 +1,6 @@
 # ACP integration
 
-`omp-im` communicates with local agents using the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/). The protocol implementation lives in `internal/acp`; the local agent launchers live in `internal/agent`.
+`omp-im` communicates with local agents using the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/). The protocol implementation and local agent launchers both live in `internal/agent`.
 
 ## Built-in adapters
 

@@ -12,6 +12,8 @@ type config struct {
 	websocketURL    string
 	allowFrom       string
 	groupAllowFrom  string
+	stream          bool
+	footer          bool
 	thinkingDisplay string // "concise", "detailed", or "off"
 	toolDisplay     string // "concise", "detailed", or "off"
 }
@@ -30,6 +32,22 @@ func parseConfig(opts map[string]any) (*config, error) {
 
 	allowFrom, _ := opts["allow_from"].(string)
 	groupAllowFrom, _ := opts["group_allow_from"].(string)
+	stream := true
+	if value, exists := opts["stream"]; exists {
+		var ok bool
+		stream, ok = value.(bool)
+		if !ok {
+			return nil, fmt.Errorf("wecom: stream must be a boolean")
+		}
+	}
+	footer := true
+	if value, exists := opts["footer"]; exists {
+		var ok bool
+		footer, ok = value.(bool)
+		if !ok {
+			return nil, fmt.Errorf("wecom: footer must be a boolean")
+		}
+	}
 	thinkingDisplay, _ := opts["thinking_display"].(string)
 	thinkingDisplay = strings.ToLower(strings.TrimSpace(thinkingDisplay))
 	if thinkingDisplay == "" {
@@ -58,6 +76,8 @@ func parseConfig(opts map[string]any) (*config, error) {
 		websocketURL:    strings.TrimSpace(websocketURL),
 		allowFrom:       strings.TrimSpace(allowFrom),
 		groupAllowFrom:  strings.TrimSpace(groupAllowFrom),
+		stream:          stream,
+		footer:          footer,
 		thinkingDisplay: thinkingDisplay,
 		toolDisplay:     toolDisplay,
 	}, nil

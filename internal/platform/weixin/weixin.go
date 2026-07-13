@@ -40,6 +40,7 @@ type Platform struct {
 	allowFrom  string
 	routeTag   string
 	stateDir   string
+	footer     bool
 
 	api           *apiClient
 	httpClient    *http.Client
@@ -101,6 +102,15 @@ func New(opts map[string]any) (*Platform, error) {
 	allowFrom, _ := opts["allow_from"].(string)
 	checkAllowFrom("weixin", allowFrom)
 
+	footer := true
+	if value, exists := opts["footer"]; exists {
+		var ok bool
+		footer, ok = value.(bool)
+		if !ok {
+			return nil, fmt.Errorf("weixin: footer must be a boolean")
+		}
+	}
+
 	baseURL, _ := opts["base_url"].(string)
 	cdnBaseURL, _ := opts["cdn_base_url"].(string)
 	if strings.TrimSpace(cdnBaseURL) == "" {
@@ -136,6 +146,7 @@ func New(opts map[string]any) (*Platform, error) {
 		allowFrom:     allowFrom,
 		routeTag:      routeTag,
 		stateDir:      stateDir,
+		footer:        footer,
 		dedup:         make(map[string]time.Time),
 		cdnHTTPClient: cdnHTTPClient,
 	}
@@ -221,6 +232,9 @@ func Logout(opts map[string]any) error {
 }
 
 func (p *Platform) Name() string { return "weixin" }
+
+// FooterEnabled reports whether the turn-summary footer should be appended.
+func (p *Platform) FooterEnabled() bool { return p.footer }
 
 func (p *Platform) loadSession() (*sessionState, error) {
 	p.sessionMu.RLock()

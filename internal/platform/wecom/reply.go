@@ -246,7 +246,7 @@ func (p *Platform) renderStream(ctx context.Context, rc *replyContext, finished 
 		rc.stopTicker = nil
 	}
 
-	content := buildStreamContent(rc, p.cfg.thinkingDisplay, p.cfg.toolDisplay, finished)
+	content := buildStreamContent(rc, p.cfg.thinkingDisplay, p.cfg.toolDisplay, finished, p.cfg.footer)
 	body := map[string]interface{}{
 		"msgtype": "stream",
 		"stream": map[string]interface{}{
@@ -310,7 +310,7 @@ func quoteText(text string) string {
 // In concise mode, the status line is shown while no body text has arrived, then
 // replaced by the body. In detailed mode, text, thinking, and tool output are kept
 // in the order they arrived and never overwritten.
-func buildStreamContent(rc *replyContext, thinkingDisplay, toolDisplay string, finished bool) string {
+func buildStreamContent(rc *replyContext, thinkingDisplay, toolDisplay string, finished, footerEnabled bool) string {
 	var parts []string
 
 	// Detailed mode: render stream sections in chronological order.
@@ -344,9 +344,9 @@ func buildStreamContent(rc *replyContext, thinkingDisplay, toolDisplay string, f
 	}
 
 	// Footer at the end of the turn.
-	if finished {
-		if footer := buildStreamFooter(rc, thinkingDisplay, toolDisplay); footer != "" {
-			parts = append(parts, footer)
+	if finished && footerEnabled {
+		if f := buildStreamFooter(rc, thinkingDisplay, toolDisplay); f != "" {
+			parts = append(parts, f)
 		}
 	}
 
@@ -389,26 +389,22 @@ func buildConciseStatusLine(rc *replyContext, thinkingDisplay, toolDisplay strin
 // buildStreamFooter builds the summary footer shown at the end of a turn.
 // It shows total elapsed time and context usage: ⏱️ Xs · 🧠 X%.
 func buildStreamFooter(rc *replyContext, thinkingDisplay, toolDisplay string) string {
-	var total string
+	var d time.Duration
 	if !rc.turnEnd.IsZero() && rc.turnEnd.After(rc.turnStart) {
-		total = formatDuration(rc.turnEnd.Sub(rc.turnStart))
+		d = rc.turnEnd.Sub(rc.turnStart)
 	} else if !rc.turnStart.IsZero() {
-		total = formatDuration(time.Since(rc.turnStart))
-	}
-	if total == "" {
+		d = time.Since(rc.turnStart)
+	} else {
 		return ""
 	}
-
-	var items []string
-	items = append(items, fmt.Sprintf("⏱️ %s", total))
-	if rc.contextSize > 0 {
-		pct := rc.contextUsed * 100 / rc.contextSize
-		items = append(items, fmt.Sprintf("🧠 %d%%", pct))
-	}
-	if (thinkingDisplay == "detailed" || toolDisplay == "detailed") && rc.toolCount > 0 {
-		items = append(items, fmt.Sprintf("🛠️ %d", rc.toolCount))
-	}
-	return strings.Join(items, " · ")
+	showTools := thinkingDisplay == "detailed" || toolDisplay == "detailed"
+	return core.BuildFooter(core.FooterInfo{
+		Duration:    d,
+		ContextUsed: rc.contextUsed,
+		ContextSize: rc.contextSize,
+		ToolCount:   rc.toolCount,
+		ShowTools:   showTools,
+	})
 }
 
 // buildToolDetails renders a detailed log of every tool call for the footer.

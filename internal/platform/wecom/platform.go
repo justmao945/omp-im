@@ -42,6 +42,12 @@ func New(opts map[string]any) (*Platform, error) {
 	return p, nil
 }
 
+// StreamingEnabled reports whether the engine should send incremental replies.
+func (p *Platform) StreamingEnabled() bool { return p.cfg.stream }
+
+// FooterEnabled reports whether the turn-summary footer should be appended.
+func (p *Platform) FooterEnabled() bool { return p.cfg.footer }
+
 // Name returns the platform name.
 func (p *Platform) Name() string { return "wecom" }
 

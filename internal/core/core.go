@@ -35,6 +35,13 @@ type StreamReplyer interface {
 	StreamEvent(ctx context.Context, replyCtx any, event StreamEvent) error
 }
 
+// FooterEnabled is implemented by platforms that can toggle the turn-summary
+// footer (⏱️ Xs · 🧠 X%). Platforms that do not implement it get no footer
+// in the non-streaming reply path.
+type FooterEnabled interface {
+	FooterEnabled() bool
+}
+
 // Platform abstracts a messaging platform (Weixin, WeCom, etc.).
 type Platform interface {
 	Name() string

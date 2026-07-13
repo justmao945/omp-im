@@ -34,6 +34,38 @@ func TestParseConfigDefaults(t *testing.T) {
 	if cfg.websocketURL != "wss://openws.work.weixin.qq.com" {
 		t.Fatalf("websocketURL = %q", cfg.websocketURL)
 	}
+	if !cfg.stream {
+		t.Fatal("stream should default to enabled")
+	}
+	if !cfg.footer {
+		t.Fatal("footer should default to enabled")
+	}
+}
+
+func TestParseConfigStream(t *testing.T) {
+	cfg, err := parseConfig(map[string]any{"bot_id": "b", "secret": "s", "stream": false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.stream {
+		t.Fatal("stream should be disabled")
+	}
+	if _, err := parseConfig(map[string]any{"bot_id": "b", "secret": "s", "stream": "false"}); err == nil {
+		t.Fatal("expected error for non-boolean stream")
+	}
+}
+
+func TestParseConfigFooter(t *testing.T) {
+	cfg, err := parseConfig(map[string]any{"bot_id": "b", "secret": "s", "footer": false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.footer {
+		t.Fatal("footer should be disabled")
+	}
+	if _, err := parseConfig(map[string]any{"bot_id": "b", "secret": "s", "footer": "false"}); err == nil {
+		t.Fatal("expected error for non-boolean footer")
+	}
 }
 
 func TestAllowList(t *testing.T) {

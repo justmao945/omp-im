@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 
-	"github.com/justmao945/omp-im/internal/acp"
 	"github.com/justmao945/omp-im/internal/core"
 )
 
@@ -19,7 +18,7 @@ type localACPConfig struct {
 }
 
 type localACPSessionRecord struct {
-	session *acp.Session
+	session *Session
 	project string
 }
 
@@ -41,7 +40,7 @@ func (a *localACPAgent) Name() string { return a.cfg.name }
 func (a *localACPAgent) Stop() error { return nil }
 
 func (a *localACPAgent) StartSession(ctx context.Context, sessionKey string, project core.Project, resumeSessionID string) (core.AgentSession, error) {
-	cfg := acp.Config{
+	cfg := Config{
 		Command:          a.cfg.command,
 		Args:             a.cfg.args,
 		WorkDir:          project.WorkDir,
@@ -49,11 +48,11 @@ func (a *localACPAgent) StartSession(ctx context.Context, sessionKey string, pro
 		AuthMethod:       a.cfg.authMethod,
 		InstallHint:      a.cfg.installHint,
 	}
-	tr, err := acp.NewTransport(cfg, nil)
+	tr, err := NewTransport(cfg, nil)
 	if err != nil {
 		return nil, err
 	}
-	s, err := acp.NewSession(ctx, cfg, sessionKey, resumeSessionID, tr)
+	s, err := NewSession(ctx, cfg, sessionKey, resumeSessionID, tr)
 	if err != nil {
 		_ = tr.Close()
 		return nil, err

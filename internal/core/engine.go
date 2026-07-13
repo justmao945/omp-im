@@ -249,6 +249,44 @@ func (e *Engine) sessionWorker(sessionKey string) {
 	}
 }
 
+// streamReplyer returns a platform's streamer when streaming is enabled. Platforms
+// that do not expose StreamingEnabled retain the existing streaming behavior.
+func streamReplyer(p Platform) (StreamReplyer, bool) {
+	streamer, ok := p.(StreamReplyer)
+	if !ok {
+		return nil, false
+	}
+	if control, ok := p.(interface{ StreamingEnabled() bool }); ok && !control.StreamingEnabled() {
+		return nil, false
+	}
+	return streamer, true
+}
+
+// footerEnabled reports whether the platform wants a turn-summary footer on
+// non-streaming replies. Platforms that do not implement FooterEnabled get
+// no footer.
+func footerEnabled(p Platform) bool {
+	if f, ok := p.(FooterEnabled); ok {
+		return f.FooterEnabled()
+	}
+	return false
+}
+
+// buildNonStreamingFooter builds a turn footer for non-streaming replies from
+// the session's final status and the recorded turn start time.
+func buildNonStreamingFooter(p Platform, session AgentSession, turnStart time.Time) string {
+	if !footerEnabled(p) {
+		return ""
+	}
+	st := session.Status()
+	return BuildFooter(FooterInfo{
+		Duration:    time.Since(turnStart),
+		ContextUsed: st.ContextUsed,
+		ContextSize: st.ContextSize,
+		ToolCount:   st.ToolCount,
+	})
+}
+
 func (e *Engine) processNormalMessage(ctx context.Context, cancel context.CancelFunc, p Platform, msg *Message, ent *sessionEntry) {
 	if err := e.ensureSessionForEntry(ctx, ent, msg.SessionKey); err != nil {
 		slog.Error("failed to start session", "session", msg.SessionKey, "error", err)
@@ -274,8 +312,10 @@ func (e *Engine) processNormalMessage(ctx context.Context, cancel context.Cancel
 	var reply string
 	var attachments []OutboundAttachment
 	var err error
+	turnStart := time.Now()
 
-	if streamer, ok := p.(StreamReplyer); ok {
+	streamer, streaming := streamReplyer(p)
+	if streaming {
 		onEvent := func(ev StreamEvent) {
 			switch ev.Type {
 			case "text":
@@ -321,7 +361,10 @@ func (e *Engine) processNormalMessage(ctx context.Context, cancel context.Cancel
 
 	slog.Info("agent turn finished", "session", msg.SessionKey, "reply_len", len(reply), "attachments", len(attachments))
 
-	if _, streaming := p.(StreamReplyer); !streaming {
+	if !streaming {
+		if f := buildNonStreamingFooter(p, Session, turnStart); f != "" {
+			reply = strings.TrimSpace(reply) + "\n\n" + f
+		}
 		if err := p.Reply(ctx, msg.ReplyCtx, reply); err != nil {
 			slog.Error("failed to send reply", "session", msg.SessionKey, "error", err)
 		}
@@ -535,6 +578,9 @@ func (e *Engine) handlePCommand(ctx context.Context, p Platform, msg *Message) {
 	lines = append(lines, "")
 	lines = append(lines, fmt.Sprintf("- **Agent:** %s", agentName))
 	lines = append(lines, fmt.Sprintf("- **Project:** %s", projectName))
+	if proj, ok := e.projects[projectName]; ok && proj.WorkDir != "" {
+		lines = append(lines, fmt.Sprintf("- **Path:** `%s`", proj.WorkDir))
+	}
 
 	e.sessionsMu.Lock()
 	ent, ok := e.sessions[sessionKey]

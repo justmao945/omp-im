@@ -294,7 +294,7 @@ func TestBuildStreamContent(t *testing.T) {
 			if tc.setup != nil {
 				tc.setup(rc)
 			}
-			got := buildStreamContent(rc, tc.thinking, tc.tool, tc.finished)
+			got := buildStreamContent(rc, tc.thinking, tc.tool, tc.finished, true)
 			for _, want := range tc.wantContains {
 				if !strings.Contains(got, want) {
 					t.Fatalf("content missing %q:\n%s", want, got)
@@ -370,14 +370,14 @@ func TestStreamFooter(t *testing.T) {
 			if tc.setup != nil {
 				tc.setup(rc)
 			}
-			footer := buildStreamFooter(rc, tc.thinking, tc.tool)
+			got := buildStreamFooter(rc, tc.thinking, tc.tool)
 			for _, want := range tc.wantContains {
-				if !strings.Contains(footer, want) {
-					t.Fatalf("footer missing %q:\n%s", want, footer)
+				if !strings.Contains(got, want) {
+					t.Fatalf("footer missing %q:\n%s", want, got)
 				}
 			}
-			if tc.wantNotContain != "" && strings.Contains(footer, tc.wantNotContain) {
-				t.Fatalf("footer should not contain %q:\n%s", tc.wantNotContain, footer)
+			if tc.wantNotContain != "" && strings.Contains(got, tc.wantNotContain) {
+				t.Fatalf("footer should not contain %q:\n%s", tc.wantNotContain, got)
 			}
 		})
 	}

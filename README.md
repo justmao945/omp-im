@@ -44,11 +44,11 @@ Leave `platforms[].options.token` empty, then log in interactively:
 omp-im -config ~/.omp-im/config.json weixin login
 ```
 
-The QR-code session is retained under `~/.omp-im/weixin/`. Set `token` instead when using an existing iLink bot token. Limit senders with `allow_from` (`"*"` or empty permits everyone).
+The QR-code session is retained under `~/.omp-im/weixin/`. Set `token` instead when using an existing iLink bot token. Limit senders with `allow_from` (`"*"` or empty permits everyone). A turn-summary footer (⏱️ elapsed · 🧠 context%) is appended to each reply by default; set `footer` to `false` to disable it.
 
 ### WeCom
 
-Configure a `wecom` platform with `bot_id` and `secret`. It connects to the AI bot WebSocket gateway, supports direct and group chats, streams replies, and accepts text, images, files, voice, mixed messages, and quoted messages. Quote content is appended to the agent prompt under `[quoted message]`.
+Configure a `wecom` platform with `bot_id` and `secret`. It connects to the AI bot WebSocket gateway, supports direct and group chats, and accepts text, images, files, voice, mixed messages, and quoted messages. Replies stream by default; set `stream` to `false` to send only a completed reply. A turn-summary footer (⏱️ elapsed · 🧠 context%) is appended by default; set `footer` to `false` to disable it. Quote content is appended to the agent prompt under `[quoted message]`.
 
 Use `allow_from` for direct-message user IDs and `group_allow_from` for group chat IDs. Both default to allowing everyone; configure explicit IDs in production. `thinking_display` and `tool_display` accept `concise` (default), `detailed`, or `off`.
 

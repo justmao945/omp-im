@@ -136,6 +136,116 @@ func (p *fakePlatform) SendFile(ctx context.Context, replyCtx any, file FileAtta
 	return nil
 }
 
+type streamModePlatform struct {
+	*fakePlatform
+	enabled bool
+}
+
+func (p *streamModePlatform) StreamingEnabled() bool { return p.enabled }
+
+func (p *streamModePlatform) StreamReply(context.Context, any, string, bool) error { return nil }
+
+func (p *streamModePlatform) StreamEvent(context.Context, any, StreamEvent) error { return nil }
+
+func TestStreamReplyerRespectsPlatformSetting(t *testing.T) {
+	p := &streamModePlatform{fakePlatform: &fakePlatform{name: "stream"}}
+	if streamer, streaming := streamReplyer(p); streaming || streamer != nil {
+		t.Fatal("disabled streaming platform should use completed replies")
+	}
+
+	p.enabled = true
+	if streamer, streaming := streamReplyer(p); !streaming || streamer == nil {
+		t.Fatal("enabled streaming platform should use incremental replies")
+	}
+}
+
+type footerPlatform struct {
+	*fakePlatform
+	footer bool
+}
+
+func (p *footerPlatform) FooterEnabled() bool { return p.footer }
+
+func TestNonStreamingFooterAppended(t *testing.T) {
+	eng, _ := newTestEngine("fake")
+	p := &footerPlatform{fakePlatform: &fakePlatform{name: "fake"}, footer: true}
+	eng.AddPlatform(p)
+
+	go func() {
+		for p.getHandler() == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+		p.getHandler()(p, &Message{
+			SessionKey: "fake:u1",
+			Platform:   "fake",
+			UserID:     "u1",
+			Content:    "hello",
+			ReplyCtx:   "ctx",
+		})
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		_ = eng.Run()
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	_ = eng.Stop()
+	<-done
+
+	p.mu.Lock()
+	replies := append([]string(nil), p.replies...)
+	p.mu.Unlock()
+
+	if len(replies) != 1 {
+		t.Fatalf("got %d replies, want 1", len(replies))
+	}
+	if !strings.Contains(replies[0], "⏱️") {
+		t.Fatalf("reply missing footer: %q", replies[0])
+	}
+}
+
+func TestNonStreamingFooterDisabled(t *testing.T) {
+	eng, _ := newTestEngine("fake")
+	p := &footerPlatform{fakePlatform: &fakePlatform{name: "fake"}, footer: false}
+	eng.AddPlatform(p)
+
+	go func() {
+		for p.getHandler() == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+		p.getHandler()(p, &Message{
+			SessionKey: "fake:u1",
+			Platform:   "fake",
+			UserID:     "u1",
+			Content:    "hello",
+			ReplyCtx:   "ctx",
+		})
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		_ = eng.Run()
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	_ = eng.Stop()
+	<-done
+
+	p.mu.Lock()
+	replies := append([]string(nil), p.replies...)
+	p.mu.Unlock()
+
+	if len(replies) != 1 {
+		t.Fatalf("got %d replies, want 1", len(replies))
+	}
+	if strings.Contains(replies[0], "⏱️") {
+		t.Fatalf("reply should not contain footer: %q", replies[0])
+	}
+}
+
 func newTestEngine(agentName string) (*Engine, *fakeAgent) {
 	agent := &fakeAgent{name: agentName, reply: "hi"}
 	agents := map[string]Agent{agentName: agent}
@@ -672,6 +782,9 @@ func TestEnginePCommandShowsStatus(t *testing.T) {
 	}
 	if !strings.Contains(pReply, "**Project:**") {
 		t.Fatalf("/p reply missing project: %q", pReply)
+	}
+	if !strings.Contains(pReply, "**Path:**") || !strings.Contains(pReply, "/tmp") {
+		t.Fatalf("/p reply missing project path: %q", pReply)
 	}
 	if strings.Contains(pReply, "Status:") || strings.Contains(pReply, "**Elapsed:**") || strings.Contains(pReply, "**Tools used:**") || strings.Contains(pReply, "**Current tool:**") || strings.Contains(pReply, "**Command:**") || strings.Contains(pReply, "**Tokens:**") {
 		t.Fatalf("/p reply should not contain elapsed/tools/command/tokens: %q", pReply)

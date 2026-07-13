@@ -14,7 +14,8 @@
     {
       "type": "weixin",
       "options": {
-        "allow_from": "*"
+        "allow_from": "*",
+        "footer": true
       }
     },
     {
@@ -22,6 +23,8 @@
       "options": {
         "bot_id": "YOUR_BOT_ID",
         "secret": "YOUR_BOT_SECRET",
+        "stream": true,
+        "footer": true,
         "allow_from": "*",
         "group_allow_from": "*"
       }

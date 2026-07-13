@@ -59,6 +59,7 @@
 | `state_dir` | `string` | Override the default Weixin state directory. |
 | `proxy` | `string` | Optional HTTP proxy for the iLink gateway. |
 | `route_tag` | `string` | Optional route tag passed to the iLink API. |
+| `footer` | `bool` | Append a turn-summary footer (⏱️ elapsed · 🧠 context%). Defaults to `true`. |
 
 ### WeCom options
 
@@ -69,6 +70,8 @@
 | `websocket_url` | `string` | Optional gateway URL. Defaults to `wss://openws.work.weixin.qq.com`. |
 | `allow_from` | `string` | Comma-separated list of allowed sender user IDs for direct messages. `"*"` or empty allows everyone. |
 | `group_allow_from` | `string` | Comma-separated list of allowed group chat IDs. `"*"` or empty allows all groups. |
+| `stream` | `bool` | Send incremental replies. Defaults to `true`; set to `false` to send only the completed reply. |
+| `footer` | `bool` | Append a turn-summary footer (⏱️ elapsed · 🧠 context%). Defaults to `true`. |
 | `thinking_display` | `string` | How agent thinking is shown: `concise` (default), `detailed`, or `off`. |
 | `tool_display` | `string` | How agent tool activity is shown: `concise` (default), `detailed`, or `off`. |
 
