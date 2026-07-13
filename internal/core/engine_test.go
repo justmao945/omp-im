@@ -143,6 +143,42 @@ func newTestEngine(agentName string) (*Engine, *fakeAgent) {
 	return NewEngine(agents, agentName, projects, "default"), agent
 }
 
+func TestEngineRunBlocksUntilStopped(t *testing.T) {
+	eng, _ := newTestEngine("fake")
+	p := &fakePlatform{name: "fake"}
+	eng.AddPlatform(p)
+
+	done := make(chan struct{})
+	go func() {
+		_ = eng.Run()
+		close(done)
+	}()
+
+	deadline := time.After(time.Second)
+	for p.getHandler() == nil {
+		select {
+		case <-deadline:
+			t.Fatal("platform did not start")
+		case <-time.After(time.Millisecond):
+		}
+	}
+
+	select {
+	case <-done:
+		t.Fatal("Run returned before Stop")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	if err := eng.Stop(); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Run did not return after Stop")
+	}
+}
+
 func TestEngineRoutesMessage(t *testing.T) {
 	eng, _ := newTestEngine("fake")
 	p := &fakePlatform{name: "fake"}
@@ -856,5 +892,3 @@ func TestFormatContext(t *testing.T) {
 		}
 	}
 }
-
-

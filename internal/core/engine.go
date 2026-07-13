@@ -59,15 +59,15 @@ type sessionEntry struct {
 func NewEngine(agents map[string]Agent, defaultAgent string, projects map[string]Project, defaultProject string) *Engine {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Engine{
-		agents:          agents,
-		defaultAgent:    defaultAgent,
-		projects:        projects,
-		defaultProject:  defaultProject,
-		platforms:       make([]Platform, 0),
-		ctx:             ctx,
-		cancel:          cancel,
-		sessions:        make(map[string]*sessionEntry),
-		activeTurns:     make(map[string]context.CancelFunc),
+		agents:         agents,
+		defaultAgent:   defaultAgent,
+		projects:       projects,
+		defaultProject: defaultProject,
+		platforms:      make([]Platform, 0),
+		ctx:            ctx,
+		cancel:         cancel,
+		sessions:       make(map[string]*sessionEntry),
+		activeTurns:    make(map[string]context.CancelFunc),
 	}
 }
 
@@ -139,17 +139,15 @@ func (e *Engine) AddPlatform(p Platform) {
 
 // Run starts all platforms and blocks until Stop is called.
 func (e *Engine) Run() error {
-	var wg sync.WaitGroup
 	for _, p := range e.platforms {
-		wg.Add(1)
 		go func(p Platform) {
-			defer wg.Done()
 			if err := p.Start(e.handleMessage); err != nil {
 				slog.Error("platform stopped", "platform", p.Name(), "error", err)
 			}
 		}(p)
 	}
-	wg.Wait()
+
+	<-e.ctx.Done()
 	return nil
 }
 
@@ -564,7 +562,6 @@ func (e *Engine) handlePCommand(ctx context.Context, p Platform, msg *Message) {
 
 	_ = p.Reply(ctx, msg.ReplyCtx, strings.Join(lines, "\n"))
 }
-
 
 func (e *Engine) handleNewCommand(ctx context.Context, p Platform, msg *Message) {
 	sessionKey := msg.SessionKey
