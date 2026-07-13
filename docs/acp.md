@@ -46,13 +46,9 @@ Session IDs are saved when a session is created and removed when the user explic
 
 ## Session listing
 
-`/ls` enumerates historical sessions from the native CLI's own on-disk store (not via an ACP method). It filters sessions whose working directory matches the current project's `work_dir` and returns up to 20, sorted by most recent activity:
+`/ls` uses the ACP `session/list` method — not disk scanning. It spawns a short-lived ACP transport for the current agent (the same command used for conversations: `omp acp`, `claude-agent-acp`, `codex-acp`), calls `initialize` to confirm the adapter advertises `sessionCapabilities.list`, then calls `session/list` with `cwd` set to the current project's `work_dir`. Up to 20 sessions are returned, each with `sessionId`, `title`, and `updatedAt` (omp additionally returns `_meta` with message count and size).
 
-| Agent | Store location | Title source |
-| --- | --- | --- |
-| `omp` | `~/.omp/agent/sessions/<encoded-cwd>/*.jsonl` | `type:title` line |
-| `claude` (Claude Code) | `~/.claude/projects/<encoded-cwd>/*.jsonl` | first user message |
-| `codex` | `~/.codex/sessions/**/*.jsonl` | `~/.codex/session_index.jsonl` `thread_name` |
+All three bundled adapters advertise and implement `session/list`. If an adapter lacks the capability, `/ls` reports that the agent does not support it.
 
 `/sw <n>` resumes the n-th session from the last `/ls` output; `/sw <id>` matches by session-id prefix. The selected id is persisted as the resume target, and the next message resumes it through `session/resume` or `session/load` as described above. The current agent and project selection are preserved.
 
@@ -61,5 +57,5 @@ Session IDs are saved when a session is created and removed when the user explic
 - [ACP overview](https://agentclientprotocol.com/protocol/v1/overview)
 - [ACP session setup](https://agentclientprotocol.com/protocol/v1/session-setup)
 - [Resuming existing sessions](https://agentclientprotocol.com/rfds/session-resume)
-- [Session list](https://agentclientprotocol.com/rfds/session-list) — protocol-level method; `omp-im` does not use it. `/ls` reads each CLI's own on-disk store instead.
+- [Session list](https://agentclientprotocol.com/rfds/session-list) — used by `/ls`.
 - [Closing active sessions](https://agentclientprotocol.com/rfds/session-close)

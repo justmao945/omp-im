@@ -36,10 +36,6 @@ Send these as messages in any supported IM conversation.
 
 ## Session listing and switching (`/ls`, `/sw`)
 
-`/ls` reads the current agent's own on-disk session store and lists the historical sessions whose working directory matches the current project. Each agent's store is read directly:
-
-- `omp` — `~/.omp/agent/sessions`
-- `claude` (Claude Code) — `~/.claude/projects`
-- `codex` — `~/.codex/sessions` (titles from `~/.codex/session_index.jsonl`)
+`/ls` queries the current agent's ACP `session/list` method (spawning a short-lived instance of the agent's own ACP command) and lists historical sessions whose working directory matches the current project, up to 20, most recent first.
 
 `/sw <n>` resumes the n-th session from the last `/ls` output; `/sw <id>` resumes by session-id prefix. The current session is closed and the selected one is resumed on the next message. The current agent and project selection are preserved.
