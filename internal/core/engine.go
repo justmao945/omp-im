@@ -30,6 +30,10 @@ type Engine struct {
 	sessionStorePath string
 	sessionStoreMu   sync.Mutex
 
+	// lastListings caches the most recent /ls result per session key so /sw
+	// can resolve an index argument.
+	lastListings map[string][]SessionInfo
+
 	activeTurns   map[string]context.CancelFunc
 	activeTurnsMu sync.Mutex
 }
@@ -67,6 +71,7 @@ func NewEngine(agents map[string]Agent, defaultAgent string, projects map[string
 		ctx:            ctx,
 		cancel:         cancel,
 		sessions:       make(map[string]*sessionEntry),
+		lastListings:   make(map[string][]SessionInfo),
 		activeTurns:    make(map[string]context.CancelFunc),
 	}
 }
@@ -499,6 +504,10 @@ func (e *Engine) handleCommand(ctx context.Context, p Platform, msg *Message, cm
 		e.handlePCommand(ctx, p, msg)
 	case "new":
 		e.handleNewCommand(ctx, p, msg)
+	case "ls":
+		e.handleLsCommand(ctx, p, msg)
+	case "sw":
+		e.handleSwCommand(ctx, p, msg, cmd.arg)
 	default:
 		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Unknown command: `/%s`", cmd.name))
 	}
@@ -553,6 +562,8 @@ func (e *Engine) handleHelpCommand(ctx context.Context, p Platform, msg *Message
 		"- `/esc` — cancel the currently generating reply\n"+
 		"- `/p` — show current agent, project, model, and context usage\n"+
 		"- `/new` — start a new session (closes the current one, next message starts fresh)\n"+
+		"- `/ls` — list the current agent's own historical sessions for this project\n"+
+		"- `/sw <n or id>` — switch to one of the listed sessions (resumes it next message)\n"+
 		"- `/help`, `/?` — show this help")
 }
 
@@ -629,6 +640,124 @@ func (e *Engine) handleNewCommand(ctx context.Context, p Platform, msg *Message)
 	}
 
 	_ = p.Reply(ctx, msg.ReplyCtx, "New session created. The next message will start a fresh conversation.")
+}
+func (e *Engine) handleLsCommand(ctx context.Context, p Platform, msg *Message) {
+	sessionKey := msg.SessionKey
+	agentName := e.sessionAgent(sessionKey)
+	projectName := e.sessionProject(sessionKey)
+	proj, ok := e.projects[projectName]
+	if !ok || proj.WorkDir == "" {
+		_ = p.Reply(ctx, msg.ReplyCtx, "No working directory for the current project.")
+		return
+	}
+	lister, ok := e.agents[agentName].(SessionLister)
+	if !ok {
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Agent `%s` does not support listing historical sessions.", agentName))
+		return
+	}
+	sessions, err := lister.ListSessions(ctx, proj.WorkDir, 20)
+	if err != nil {
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Failed to list sessions: %v", err))
+		return
+	}
+	e.sessionsMu.Lock()
+	e.lastListings[sessionKey] = sessions
+	e.sessionsMu.Unlock()
+	if len(sessions) == 0 {
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("No historical sessions for **%s** in `%s`.", agentName, proj.WorkDir))
+		return
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "## Sessions — %s @ %s\n\n", agentName, projectName)
+	for i, s := range sessions {
+		title := s.Title
+		if title == "" {
+			title = "(no title)"
+		}
+		fmt.Fprintf(&b, "%d. `%s` · %s · %s\n", i+1, shortID(s.ID), title, formatRelativeTime(s.UpdatedAt))
+	}
+	b.WriteString("\n`/sw <n or id>` resumes one of the sessions above.")
+	_ = p.Reply(ctx, msg.ReplyCtx, b.String())
+}
+
+func (e *Engine) handleSwCommand(ctx context.Context, p Platform, msg *Message, arg string) {
+	sessionKey := msg.SessionKey
+	if arg == "" {
+		_ = p.Reply(ctx, msg.ReplyCtx, "Usage: `/sw <n or session id>` — list sessions with `/ls`.")
+		return
+	}
+	e.sessionsMu.Lock()
+	listing := append([]SessionInfo(nil), e.lastListings[sessionKey]...)
+	e.sessionsMu.Unlock()
+
+	var targetID string
+	if n, err := strconv.Atoi(arg); err == nil {
+		idx := n - 1
+		if idx < 0 || idx >= len(listing) {
+			_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("No session #%s. Run `/ls` to list sessions.", arg))
+			return
+		}
+		targetID = listing[idx].ID
+	} else {
+		for _, s := range listing {
+			if strings.HasPrefix(s.ID, arg) {
+				targetID = s.ID
+				break
+			}
+		}
+		if targetID == "" {
+			_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("No session matching `%s`. Run `/ls` first.", arg))
+			return
+		}
+	}
+
+	e.switchSessionID(sessionKey, targetID)
+	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Switched to session `%s`. The next message resumes that conversation.", shortID(targetID)))
+}
+
+// switchSessionID closes any live ACP session for sessionKey and persists
+// targetID as the resume target so the next message resumes that conversation.
+// The current agent and project selection are preserved.
+func (e *Engine) switchSessionID(sessionKey, sessionID string) {
+	e.sessionsMu.Lock()
+	if ent, ok := e.sessions[sessionKey]; ok && ent != nil {
+		if ent.session != nil {
+			_ = ent.session.Close()
+		}
+		ent.session = nil
+		ent.closed = false
+		ent.queue = nil
+		ent.status = "idle"
+		ent.lastActivity = time.Now()
+	}
+	e.sessionsMu.Unlock()
+	e.setSessionID(sessionKey, sessionID)
+}
+
+// shortID returns the first 8 characters of a session id for display.
+func shortID(id string) string {
+	if len(id) <= 8 {
+		return id
+	}
+	return id[:8]
+}
+
+// formatRelativeTime renders a time as a human-friendly relative duration.
+func formatRelativeTime(t time.Time) string {
+	if t.IsZero() {
+		return "unknown"
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return t.UTC().Format("2006-01-02")
+	}
 }
 
 func formatDuration(d time.Duration) string {

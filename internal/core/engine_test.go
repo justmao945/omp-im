@@ -17,6 +17,7 @@ type fakeAgent struct {
 	attachments  []OutboundAttachment
 	err          error
 	started      int
+	lastResume   string
 	mu           sync.Mutex
 	respondDelay time.Duration
 }
@@ -29,6 +30,7 @@ func (a *fakeAgent) StartSession(ctx context.Context, sessionKey string, project
 	}
 	a.mu.Lock()
 	a.started++
+	a.lastResume = resumeSessionID
 	delay := a.respondDelay
 	a.mu.Unlock()
 	sid := resumeSessionID
@@ -1003,5 +1005,180 @@ func TestFormatContext(t *testing.T) {
 		if got != c.want {
 			t.Errorf("formatContext(%d, %d) = %q, want %q", c.used, c.size, got, c.want)
 		}
+	}
+}
+
+// listAgent wraps fakeAgent and implements SessionLister for /ls tests.
+type listAgent struct {
+	*fakeAgent
+	sessions []SessionInfo
+}
+
+func (a *listAgent) ListSessions(ctx context.Context, workDir string, limit int) ([]SessionInfo, error) {
+	return a.sessions, nil
+}
+
+func TestEngineLsCommand(t *testing.T) {
+	sessions := []SessionInfo{
+		{ID: "aaaaaaaa-1111-2222-3333-444444444444", Title: "Fix startup", UpdatedAt: time.Now().Add(-time.Hour)},
+		{ID: "bbbbbbbb-1111-2222-3333-444444444444", Title: "Add footer", UpdatedAt: time.Now().Add(-2 * time.Hour)},
+	}
+	agent := &listAgent{fakeAgent: &fakeAgent{name: "omp", reply: "hi"}, sessions: sessions}
+	eng := NewEngine(
+		map[string]Agent{"omp": agent},
+		"omp",
+		map[string]Project{"default": {Name: "default", WorkDir: "/tmp"}},
+		"default",
+	)
+	p := &fakePlatform{name: "fake"}
+	eng.AddPlatform(p)
+
+	go func() {
+		for p.getHandler() == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+		p.getHandler()(p, &Message{
+			SessionKey: "fake:u1", Platform: "fake", UserID: "u1",
+			Content: "/ls", ReplyCtx: "ctx",
+		})
+	}()
+
+	done := make(chan struct{})
+	go func() { _ = eng.Run(); close(done) }()
+	time.Sleep(100 * time.Millisecond)
+	_ = eng.Stop()
+	<-done
+
+	p.mu.Lock()
+	replies := append([]string(nil), p.replies...)
+	p.mu.Unlock()
+	if len(replies) != 1 {
+		t.Fatalf("got %d replies, want 1", len(replies))
+	}
+	body := replies[0]
+	if !strings.Contains(body, "aaaaaaaa") || !strings.Contains(body, "Fix startup") {
+		t.Fatalf("ls reply missing first session: %q", body)
+	}
+	if !strings.Contains(body, "bbbbbbbb") || !strings.Contains(body, "Add footer") {
+		t.Fatalf("ls reply missing second session: %q", body)
+	}
+}
+
+func TestEngineLsNoLister(t *testing.T) {
+	eng, _ := newTestEngine("fake")
+	p := &fakePlatform{name: "fake"}
+	eng.AddPlatform(p)
+
+	go func() {
+		for p.getHandler() == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+		p.getHandler()(p, &Message{
+			SessionKey: "fake:u1", Platform: "fake", UserID: "u1",
+			Content: "/ls", ReplyCtx: "ctx",
+		})
+	}()
+	done := make(chan struct{})
+	go func() { _ = eng.Run(); close(done) }()
+	time.Sleep(80 * time.Millisecond)
+	_ = eng.Stop()
+	<-done
+
+	p.mu.Lock()
+	replies := append([]string(nil), p.replies...)
+	p.mu.Unlock()
+	if len(replies) != 1 || !strings.Contains(replies[0], "does not support") {
+		t.Fatalf("expected unsupported reply, got %v", replies)
+	}
+}
+
+func TestEngineSwCommandResumes(t *testing.T) {
+	sessions := []SessionInfo{
+		{ID: "target-id-aaaa", Title: "Old session", UpdatedAt: time.Now()},
+	}
+	agent := &listAgent{fakeAgent: &fakeAgent{name: "omp", reply: "hi"}, sessions: sessions}
+	eng := NewEngine(
+		map[string]Agent{"omp": agent},
+		"omp",
+		map[string]Project{"default": {Name: "default", WorkDir: "/tmp"}},
+		"default",
+	)
+	p := &fakePlatform{name: "fake"}
+	eng.AddPlatform(p)
+
+	dir := t.TempDir()
+	if err := eng.SetSessionStore(filepath.Join(dir, "sessions.db")); err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		for p.getHandler() == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+		// List, then switch by index, then send a normal message.
+		p.getHandler()(p, &Message{SessionKey: "fake:u1", Platform: "fake", UserID: "u1", Content: "/ls", ReplyCtx: "ctx"})
+		time.Sleep(40 * time.Millisecond)
+		p.getHandler()(p, &Message{SessionKey: "fake:u1", Platform: "fake", UserID: "u1", Content: "/sw 1", ReplyCtx: "ctx"})
+		time.Sleep(40 * time.Millisecond)
+		p.getHandler()(p, &Message{SessionKey: "fake:u1", Platform: "fake", UserID: "u1", Content: "hello", ReplyCtx: "ctx"})
+	}()
+	done := make(chan struct{})
+	go func() { _ = eng.Run(); close(done) }()
+	time.Sleep(200 * time.Millisecond)
+	_ = eng.Stop()
+	<-done
+
+	// The resumed id is captured on the agent before the store is closed by Stop.
+	if agent.lastResume != "target-id-aaaa" {
+		t.Fatalf("agent resume id = %q, want target-id-aaaa", agent.lastResume)
+	}
+	if agent.Started() != 1 {
+		t.Fatalf("agent started %d times, want 1 (resumed)", agent.Started())
+	}
+	p.mu.Lock()
+	replies := append([]string(nil), p.replies...)
+	p.mu.Unlock()
+	var switched bool
+	for _, r := range replies {
+		if strings.Contains(r, "Switched to session") {
+			switched = true
+		}
+	}
+	if !switched {
+		t.Fatalf("no switch confirmation in replies: %v", replies)
+	}
+}
+
+func TestEngineSwCommandInvalidIndex(t *testing.T) {
+	sessions := []SessionInfo{{ID: "x", Title: "only", UpdatedAt: time.Now()}}
+	agent := &listAgent{fakeAgent: &fakeAgent{name: "omp", reply: "hi"}, sessions: sessions}
+	eng := NewEngine(
+		map[string]Agent{"omp": agent},
+		"omp",
+		map[string]Project{"default": {Name: "default", WorkDir: "/tmp"}},
+		"default",
+	)
+	p := &fakePlatform{name: "fake"}
+	eng.AddPlatform(p)
+
+	go func() {
+		for p.getHandler() == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+		p.getHandler()(p, &Message{SessionKey: "fake:u1", Platform: "fake", UserID: "u1", Content: "/ls", ReplyCtx: "ctx"})
+		time.Sleep(40 * time.Millisecond)
+		p.getHandler()(p, &Message{SessionKey: "fake:u1", Platform: "fake", UserID: "u1", Content: "/sw 5", ReplyCtx: "ctx"})
+	}()
+	done := make(chan struct{})
+	go func() { _ = eng.Run(); close(done) }()
+	time.Sleep(120 * time.Millisecond)
+	_ = eng.Stop()
+	<-done
+
+	p.mu.Lock()
+	replies := append([]string(nil), p.replies...)
+	p.mu.Unlock()
+	if len(replies) < 2 || !strings.Contains(replies[len(replies)-1], "No session #5") {
+		t.Fatalf("expected invalid-index reply, got %v", replies)
 	}
 }

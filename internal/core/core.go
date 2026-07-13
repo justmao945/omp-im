@@ -103,6 +103,20 @@ type AgentSession interface {
 	SessionID() string
 }
 
+// SessionInfo describes a historical agent session stored on disk by the
+// agent's own CLI (omp, claude, codex). The engine uses it for /ls and /sw.
+type SessionInfo struct {
+	ID        string
+	Title     string
+	UpdatedAt time.Time
+}
+
+// SessionLister is optionally implemented by agents that can enumerate their
+// CLI's own historical sessions on disk for a given working directory.
+type SessionLister interface {
+	ListSessions(ctx context.Context, workDir string, limit int) ([]SessionInfo, error)
+}
+
 // ImageSender is implemented by platforms that can send images.
 type ImageSender interface {
 	SendImage(ctx context.Context, replyCtx any, img ImageAttachment) error

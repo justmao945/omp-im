@@ -11,6 +11,8 @@ Send these as messages in any supported IM conversation.
 | `/p` | Show current agent, project, active model, and context usage. |
 | `/esc` | Cancel the currently generating agent reply. |
 | `/new` | Close the current session and start a fresh conversation on the next message. |
+| `/ls` | List the current agent's own historical sessions for the current project's working directory. |
+| `/sw <n or id>` | Switch to one of the sessions listed by `/ls` (by 1-based index or session-id prefix). The next message resumes that conversation. |
 | `/help`, `/?` | Show the command list. |
 
 ## Status output (`/p`)
@@ -31,3 +33,13 @@ Send these as messages in any supported IM conversation.
 - `Context` shows used context as a percentage and the total context window.
 - `Tokens` shows input / output token counts for the current turn.
 - `Command` is displayed only while an `execute` tool is running.
+
+## Session listing and switching (`/ls`, `/sw`)
+
+`/ls` reads the current agent's own on-disk session store and lists the historical sessions whose working directory matches the current project. Each agent's store is read directly:
+
+- `omp` — `~/.omp/agent/sessions`
+- `claude` (Claude Code) — `~/.claude/projects`
+- `codex` — `~/.codex/sessions` (titles from `~/.codex/session_index.jsonl`)
+
+`/sw <n>` resumes the n-th session from the last `/ls` output; `/sw <id>` resumes by session-id prefix. The current session is closed and the selected one is resumed on the next message. The current agent and project selection are preserved.

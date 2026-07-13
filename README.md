@@ -77,6 +77,8 @@ curl -X POST http://localhost:8080/send \
 | `/p` | Show agent, model, turn status, and token usage. |
 | `/esc` | Cancel the active reply. |
 | `/new` | Start a fresh conversation. |
+| `/ls` | List the current agent's own historical sessions for this project. |
+| `/sw <n or id>` | Switch to one of the listed sessions (resumes it next message). |
 
 Agent session IDs persist in `~/.omp-im/sessions.db` by default (bbolt). On restart, `omp-im` resumes ACP sessions when the selected adapter supports it. `/new`, an agent switch, or a project switch clears the saved session.
 
