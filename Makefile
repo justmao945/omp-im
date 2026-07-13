@@ -12,7 +12,8 @@ run: build
 clean:
 	rm -f omp-im
 
-pm2-start: build
+pm2-start: install-user
+	pm2 delete omp-im 2>/dev/null || true
 	pm2 start ecosystem.config.js
 
 pm2-stop:

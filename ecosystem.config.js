@@ -2,12 +2,11 @@ const path = require('path');
 const os = require('os');
 
 const homeDir = os.homedir();
-const repoDir = __dirname;
 
 module.exports = {
   apps: [{
     name: 'omp-im',
-    script: path.join(repoDir, 'omp-im'),
+    script: path.join(homeDir, '.local', 'bin', 'omp-im'),
     args: '--config config.json --log-level info',
     cwd: path.join(homeDir, '.omp-im'),
     autorestart: true,

@@ -33,7 +33,7 @@ One ACP session is created per IM conversation. The session is keyed by the plat
 
 ## Session persistence
 
-If the agent advertises support, `omp-im` can resume a previous session after a restart instead of starting a new one. `omp-im` persists agent session IDs in `~/.omp-im/sessions.json`.
+If the agent advertises support, `omp-im` can resume a previous session after a restart instead of starting a new one. `omp-im` persists agent session IDs in `~/.omp-im/sessions.db` by default.
 
 Two ACP methods are used, in order of preference:
 

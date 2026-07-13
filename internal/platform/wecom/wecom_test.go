@@ -102,6 +102,34 @@ func TestParseInboundMessageIncludesQuotedText(t *testing.T) {
 	}
 }
 
+func TestParseInboundMessageLogsQuotedContent(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	parseInboundMessage(&wsFrame{
+		Cmd: "aibot_msg_callback",
+		Body: map[string]interface{}{
+			"msgid":   "m-quote-log",
+			"chatid":  "g1",
+			"msgtype": "text",
+			"text":    map[string]interface{}{"content": "question"},
+			"quote": map[string]interface{}{
+				"msgtype": "text",
+				"text":    map[string]interface{}{"content": "quoted content"},
+			},
+		},
+	})
+	logsText := logs.String()
+	if !strings.Contains(logsText, "wecom: inbound quote metadata") || !strings.Contains(logsText, "has_quote=true") {
+		t.Fatalf("logs = %q, want quote metadata", logsText)
+	}
+	if !strings.Contains(logsText, "wecom: received quoted message") || !strings.Contains(logsText, "quoted content") {
+		t.Fatalf("logs = %q, want quoted message content", logsText)
+	}
+}
+
 func TestParseInboundMessageSkipsEvents(t *testing.T) {
 	frame := &wsFrame{Cmd: "aibot_event_callback"}
 	if parseInboundMessage(frame) != nil {

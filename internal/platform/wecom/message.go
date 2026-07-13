@@ -2,6 +2,7 @@ package wecom
 
 import (
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -141,6 +142,9 @@ func parseInboundMessage(frame *wsFrame) *inboundMessage {
 		aibotid:  aibotid,
 	}
 
+	_, hasQuote := body["quote"]
+	slog.Info("wecom: inbound quote metadata", "message_id", msgid, "chatid", chatid, "msgtype", msgtype, "has_quote", hasQuote, "body_fields", messageBodyFields(body))
+
 	text, images, files := parseMessageContent(msgtype, body, aibotid)
 	m.text = text
 	m.images = images
@@ -149,6 +153,7 @@ func parseInboundMessage(frame *wsFrame) *inboundMessage {
 	if quote, ok := body["quote"].(map[string]interface{}); ok {
 		quoteType, _ := quote["msgtype"].(string)
 		quoteText, quoteImages, quoteFiles := parseMessageContent(quoteType, quote, aibotid)
+		slog.Info("wecom: received quoted message", "message_id", msgid, "chatid", chatid, "quote_msgtype", quoteType, "quote_content", truncate(quoteText, 200), "quote_images", len(quoteImages), "quote_files", len(quoteFiles))
 		m.text = appendQuotedMessage(m.text, quoteText)
 		m.images = append(m.images, quoteImages...)
 		m.files = append(m.files, quoteFiles...)
@@ -157,6 +162,16 @@ func parseInboundMessage(frame *wsFrame) *inboundMessage {
 	slog.Debug("wecom: parsed inbound message", "msgtype", msgtype, "text_len", len(m.text), "images", len(m.images), "from", fromUser, "aibotid", aibotid)
 
 	return m
+}
+
+// messageBodyFields returns sorted top-level fields for safe payload diagnostics.
+func messageBodyFields(body map[string]interface{}) []string {
+	fields := make([]string, 0, len(body))
+	for field := range body {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+	return fields
 }
 
 // parseMessageContent extracts the text and attachments from a WeCom message

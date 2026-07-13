@@ -1,118 +1,100 @@
 # omp-im
 
-IM connector for local AI agents. Currently supports Weixin (personal) via the iLink Bot protocol and WeCom (enterprise) via AI bot WebSocket long connection; more platforms may follow.
+Run local ACP coding agents from Weixin or WeCom. Each chat gets an isolated agent session and working directory; replies stream back to the IM conversation.
 
-## Run
+## Quick start
+
+Requirements: Go and the agent command selected by `default.agent`.
 
 ```bash
 mkdir -p ~/.omp-im
 cp config.example.json ~/.omp-im/config.json
-# Edit projects and optionally set Weixin token, then run.
-go run ./cmd/omp-im
+# Edit work_dir and retain only the platform(s) you configure.
+go run ./cmd/omp-im -config ~/.omp-im/config.json -log-level info
 ```
 
-Or build and install a binary:
+`config.example.json` contains both Weixin and WeCom examples. Remove an unconfigured platform: WeCom requires both `bot_id` and `secret`.
+
+Build an executable when running persistently:
 
 ```bash
 make build
-make install        # installs to /usr/local/bin (may need sudo)
-# or
-make install-user   # installs to ~/.local/bin
-
-omp-im
+make install-user # installs ~/.local/bin/omp-im
 ```
 
-### Run with PM2 (background)
+## Agents
+
+| Config name | Local ACP command | Installation |
+| --- | --- | --- |
+| `omp` | `omp acp` | Install and authenticate the `omp` CLI. |
+| `claude` | `claude-agent-acp` | `npm install -g @agentclientprotocol/claude-agent-acp` |
+| `codex` | `codex-acp` | `npm install -g @agentclientprotocol/codex-acp` |
+
+Claude Code and Codex use their own local CLI credentials. `omp-im` reports the installation command when a selected ACP adapter is unavailable.
+
+> `omp` tool calls are auto-approved. Restrict platform access with `allow_from` and `group_allow_from` before exposing it to other users.
+
+## Platforms
+
+### Weixin
+
+Leave `platforms[].options.token` empty, then log in interactively:
 
 ```bash
-make pm2-start
-pm2 save
-pm2 startup          # follow the printed command to enable auto-start on boot
+omp-im -config ~/.omp-im/config.json weixin login
 ```
 
-Manage the process:
+The QR-code session is retained under `~/.omp-im/weixin/`. Set `token` instead when using an existing iLink bot token. Limit senders with `allow_from` (`"*"` or empty permits everyone).
+
+### WeCom
+
+Configure a `wecom` platform with `bot_id` and `secret`. It connects to the AI bot WebSocket gateway, supports direct and group chats, streams replies, and accepts text, images, files, voice, mixed messages, and quoted messages. Quote content is appended to the agent prompt under `[quoted message]`.
+
+Use `allow_from` for direct-message user IDs and `group_allow_from` for group chat IDs. Both default to allowing everyone; configure explicit IDs in production. `thinking_display` and `tool_display` accept `concise` (default), `detailed`, or `off`.
+
+### Local HTTP testing
+
+Use the test-only HTTP platform without an IM account:
+
+```json
+{"type":"http","options":{"addr":":8080"}}
+```
+
+Then POST a message:
 
 ```bash
-pm2 status
-pm2 logs omp-im                    # stream logs (keeps running)
-pm2 logs omp-im --lines 20 --nostream   # print last 20 lines and exit
+curl -X POST http://localhost:8080/send \
+  -H 'Content-Type: application/json' \
+  -d '{"session_key":"test:u1","user_id":"u1","content":"hello"}'
+```
+
+## Operations
+
+| Command | Purpose |
+| --- | --- |
+| `/agent [name]` | Show or switch agent. |
+| `/proj [name]` | Show or switch project. |
+| `/p` | Show agent, model, turn status, and token usage. |
+| `/esc` | Cancel the active reply. |
+| `/new` | Start a fresh conversation. |
+
+Agent session IDs persist in `~/.omp-im/sessions.db` by default (bbolt). On restart, `omp-im` resumes ACP sessions when the selected adapter supports it. `/new`, an agent switch, or a project switch clears the saved session.
+
+### PM2
+
+`ecosystem.config.js` runs the installed binary at `~/.local/bin/omp-im` from `~/.omp-im` using `config.json`.
+
+```bash
+make install-user
+pm2 delete omp-im 2>/dev/null || true
+pm2 start ecosystem.config.js
+pm2 logs omp-im
 pm2 restart omp-im
 make pm2-stop
 ```
 
-All working data is stored under `~/.omp-im`.
-
-## Quick links
+## Reference
 
 - [Configuration](docs/config.md)
 - [Chat commands](docs/commands.md)
 - [ACP integration](docs/acp.md)
-
-## Architecture
-
-- `internal/core` — `Platform` / `Agent` / `Engine` abstractions, slash-command dispatch, and session persistence.
-- `internal/platform/weixin` — iLink long-poll inbound + media outbound; QR-code login.
-- `internal/agent` — factory and local ACP launchers for `omp`, `claude`, and `codex`.
-- `internal/acp` — generic [Agent Client Protocol](https://agentclientprotocol.com/) client: JSON-RPC over stdio, session lifecycle, and tool-call handling.
-- `cmd/omp-im` — entry point.
-
-## Weixin setup
-
-### QR-code login (recommended)
-
-Leave `platforms[0].options.token` empty and run:
-
-```bash
-omp-im weixin login
-```
-
-Scan the terminal QR code with WeChat. The login state is saved to `~/.omp-im/weixin/default/session.json` and reused on restart.
-
-### Token login
-
-If you already have an iLink bot Bearer token, set `platforms[0].options.token`.
-
-### Logout
-
-```bash
-omp-im weixin logout
-```
-
-### Access control
-
-Set `allow_from` to a comma-separated list of Weixin user IDs to restrict senders. `"*"` or empty allows everyone.
-
-## Chat commands
-
-- `/agent` / `/agent <name>` — show or switch agent.
-- `/proj` / `/proj <name>` — show or switch project (working directory).
-- `/p` — show current agent, project, turn status, and token usage.
-- `/esc` — cancel the current reply.
-- `/new` — start a fresh session.
-- `/help`, `/?` — show help.
-
-See [docs/commands.md](docs/commands.md) for details.
-
-## Session persistence across restarts
-
-`omp-im` persists agent session IDs to `~/.omp-im/sessions.json`. On restart, it attempts to resume previous ACP sessions via `session/resume` or `session/load` if the agent supports it. If not, the conversation starts fresh. Explicit `/new` or switching agent/project clears the persisted session ID.
-
-## Development
-
-If the default Go module proxy is slow or unreachable, use a domestic mirror:
-
-```bash
-go env -w GOPROXY=https://goproxy.cn,direct
-```
-
-## Current scope
-
-- Text messages: ✅
-- Multi-turn sessions via ACP: ✅
-- Images from Weixin to agent: ✅
-- Tool execution (auto-approved with built-in `omp`): ✅
-- Sending images/files back to Weixin: ✅
-- Multi-agent switching: ✅
-- Per-project working directories: ✅
-- Weixin QR-code login: ✅
-- Session persistence across restarts: ✅
