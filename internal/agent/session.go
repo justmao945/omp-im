@@ -52,6 +52,7 @@ type Session struct {
 	OnClose          func()
 	capLoadSession   bool
 	capResumeSession bool
+	capClose         bool
 }
 
 type historyEntry struct {
@@ -196,6 +197,7 @@ func (s *Session) handshake(ctx context.Context) error {
 			LoadSession         bool `json:"loadSession"`
 			SessionCapabilities struct {
 				Resume json.RawMessage `json:"resume"`
+				Close  json.RawMessage `json:"close"`
 			} `json:"sessionCapabilities"`
 		} `json:"agentCapabilities"`
 	}
@@ -204,7 +206,8 @@ func (s *Session) handshake(ctx context.Context) error {
 	}
 	s.capLoadSession = initOut.AgentCapabilities.LoadSession
 	s.capResumeSession = len(initOut.AgentCapabilities.SessionCapabilities.Resume) > 0
-	slog.Debug("acp initialized", "protocol", initOut.ProtocolVersion, "load_session", s.capLoadSession, "resume_session", s.capResumeSession)
+	s.capClose = len(initOut.AgentCapabilities.SessionCapabilities.Close) > 0
+	slog.Debug("acp initialized", "protocol", initOut.ProtocolVersion, "load_session", s.capLoadSession, "resume_session", s.capResumeSession, "close_session", s.capClose)
 
 	// Some ACP adapters rely on the local CLI's own login state and do not need
 	// an ACP authenticate request.
@@ -587,9 +590,19 @@ func (s *Session) setUsage(pr promptResult) {
 	s.agentStatus.OutputTokens = pr.Usage.OutputTokens
 }
 
+// Close sends a session/close request (if the adapter supports it) so the
+// agent can cancel any ongoing work and free resources, then terminates the
+// ACP process.
 func (s *Session) Close() error {
 	if s.tr == nil {
 		return nil
+	}
+	if s.capClose && s.sessionID != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_, _ = s.tr.call(ctx, "session/close", map[string]any{
+			"sessionId": s.sessionID,
+		})
+		cancel()
 	}
 	err := s.tr.Close()
 	if s.OnClose != nil {

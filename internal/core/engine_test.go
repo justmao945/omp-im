@@ -1221,3 +1221,37 @@ func TestEngineSwCommandInvalidIndex(t *testing.T) {
 		t.Fatalf("expected invalid-index reply, got %v", replies)
 	}
 }
+
+func TestEngineSlashSlashPassthrough(t *testing.T) {
+	eng, _ := newTestEngine("fake")
+	p := &fakePlatform{name: "fake"}
+	eng.AddPlatform(p)
+
+	go func() {
+		for p.getHandler() == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+		p.getHandler()(p, &Message{
+			SessionKey: "fake:u1", Platform: "fake", UserID: "u1",
+			Content: "//web search cats", ReplyCtx: "ctx",
+		})
+	}()
+	done := make(chan struct{})
+	go func() { _ = eng.Run(); close(done) }()
+	time.Sleep(100 * time.Millisecond)
+	_ = eng.Stop()
+	<-done
+
+	p.mu.Lock()
+	replies := append([]string(nil), p.replies...)
+	p.mu.Unlock()
+	if len(replies) != 1 {
+		t.Fatalf("got %d replies, want 1", len(replies))
+	}
+	// fakeAgent replies "hi:" + prompt. The prompt should be "/web search cats"
+	// (one leading slash stripped from "//web search cats").
+	want := "hi:/web search cats"
+	if replies[0] != want {
+		t.Fatalf("reply = %q, want %q", replies[0], want)
+	}
+}

@@ -31,7 +31,7 @@ One ACP session is created per IM conversation. The session is keyed by the plat
 4. `session/prompt` — sends the user message to the agent.
 5. `session/update` — agent streams assistant text, tool calls, and attachments back to `omp-im`.
 6. `session/cancel` — sent by `/esc` to abort the current turn; the agent stops generating and responds to the in-flight `session/prompt` with `stopReason: "cancelled"`.
-## Session persistence
+7. `session/close` — sent when closing a session (agent/project switch, `/new`, `/sw`, shutdown); the agent cancels any ongoing work and frees resources before the ACP process is terminated.
 
 If the agent advertises support, `omp-im` can resume a previous session after a restart instead of starting a new one. `omp-im` persists agent session IDs in `~/.omp-im/sessions.db` by default.
 
@@ -59,4 +59,5 @@ All three bundled adapters advertise and implement `session/list`. If an adapter
 - [Resuming existing sessions](https://agentclientprotocol.com/rfds/session-resume)
 - [Session list](https://agentclientprotocol.com/rfds/session-list) — used by `/ls`.
 - [Prompt turn & cancellation](https://agentclientprotocol.com/protocol/v1/prompt-turn#cancellation) — `session/cancel` used by `/esc`.
-- [Closing active sessions](https://agentclientprotocol.com/rfds/session-close)
+- [Closing active sessions](https://agentclientprotocol.com/rfds/session-close) — `session/close` used on session teardown.
+- [Slash commands](https://agentclientprotocol.com/protocol/v1/slash-commands) — agent-side commands invoked via `//` passthrough.

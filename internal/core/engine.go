@@ -201,6 +201,16 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 	}
 	slog.Info("incoming message", "platform", msg.Platform, "session", msg.SessionKey, "user", msg.UserID, "content", truncate(msg.Content, 200))
 
+	// // prefix: strip one leading slash and pass the remainder to the agent
+	// as a normal prompt. This lets users invoke agent-side slash commands
+	// (e.g. //web query → /web query) without omp-im intercepting them.
+	if strings.HasPrefix(msg.Content, "//") {
+		passthrough := *msg
+		passthrough.Content = msg.Content[1:]
+		e.queueNormalMessage(p, &passthrough)
+		return
+	}
+
 	cmd, isCmd := parseCommand(msg.Content)
 	if isCmd {
 		ctx, cancel := context.WithTimeout(e.ctx, defaultTurnTimeout)
@@ -554,7 +564,6 @@ func (e *Engine) handleProjCommand(ctx context.Context, p Platform, msg *Message
 	}
 	if _, ok := e.projects[arg]; !ok {
 		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Unknown project: `%s`", arg))
-		return
 	}
 	e.setSessionProject(sessionKey, arg)
 	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Switched project to **%s**. Takes effect on the next message.", arg))
@@ -571,6 +580,7 @@ func (e *Engine) handleHelpCommand(ctx context.Context, p Platform, msg *Message
 		"- `/new` — start a new session (closes the current one, next message starts fresh)\n"+
 		"- `/ls` — list the current agent's own historical sessions for this project\n"+
 		"- `/sw <n or id>` — switch to one of the listed sessions (resumes it next message)\n"+
+		"- `//<cmd>` — pass a slash command through to the agent (e.g. `//web query`)\n"+
 		"- `/help`, `/?` — show this help")
 }
 

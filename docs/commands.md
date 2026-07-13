@@ -13,6 +13,7 @@ Send these as messages in any supported IM conversation.
 | `/new` | Close the current session and start a fresh conversation on the next message. |
 | `/ls` | List the current agent's own historical sessions for the current project's working directory. |
 | `/sw <n or id>` | Switch to one of the sessions listed by `/ls` (by 1-based index or session-id prefix). The next message resumes that conversation. |
+| `//<cmd>` | Pass a slash command through to the agent (e.g. `//web query` sends `/web query` to the agent as a normal prompt). |
 | `/help`, `/?` | Show the command list. |
 
 ## Status output (`/p`)
@@ -39,3 +40,13 @@ Send these as messages in any supported IM conversation.
 `/ls` queries the current agent's ACP `session/list` method (spawning a short-lived instance of the agent's own ACP command) and lists historical sessions whose working directory matches the current project, up to 20, most recent first.
 
 `/sw <n>` resumes the n-th session from the last `/ls` output; `/sw <id>` resumes by session-id prefix. The current session is closed and the selected one is resumed on the next message. The current agent and project selection are preserved.
+
+## Slash command passthrough (`//`)
+
+Agents advertise their own slash commands (e.g. `/web`, `/test`, `/plan`). omp-im intercepts messages starting with a single `/` as its own commands. To send a slash command to the agent, prefix it with an extra `/`:
+
+```
+//web search for agent client protocol
+```
+
+omp-im strips one `/` and sends `/web search for agent client protocol` as a normal prompt. The agent recognizes the `/web` prefix and processes it.
