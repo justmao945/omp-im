@@ -37,7 +37,7 @@ func (a *fakeAgent) StartSession(ctx context.Context, sessionKey string, project
 	if sid == "" {
 		sid = "fake-" + sessionKey
 	}
-	return &fakeSession{reply: a.reply, attachments: a.attachments, project: project, delay: delay, sessionID: sid}, nil
+	return &fakeSession{reply: a.reply, attachments: a.attachments, project: project, delay: delay, sessionID: sid, cancelCh: make(chan struct{})}, nil
 }
 func (a *fakeAgent) Started() int {
 	a.mu.Lock()
@@ -55,10 +55,24 @@ type fakeSession struct {
 	inputTokens  int
 	outputTokens int
 	sessionID    string
+	cancelled    bool
+	cancelCh     chan struct{}
 }
 
 func (s *fakeSession) SessionID() string {
 	return s.sessionID
+}
+
+func (s *fakeSession) Cancel() error {
+	s.cancelled = true
+	if s.cancelCh != nil {
+		select {
+		case <-s.cancelCh:
+		default:
+			close(s.cancelCh)
+		}
+	}
+	return nil
 }
 
 func (s *fakeSession) Respond(ctx context.Context, prompt string, images []ImageAttachment, files []FileAttachment, onEvent func(StreamEvent)) (string, []OutboundAttachment, error) {
@@ -67,7 +81,13 @@ func (s *fakeSession) Respond(ctx context.Context, prompt string, images []Image
 		case <-ctx.Done():
 			return "", nil, ctx.Err()
 		case <-time.After(s.delay):
+		case <-s.cancelCh:
+			return "", nil, ErrCancelled
 		}
+	}
+	// If Cancel was called, simulate the agent's cancelled stop reason.
+	if s.cancelled {
+		return "", nil, ErrCancelled
 	}
 	reply := s.reply + ":" + prompt
 	s.history = append(s.history, HistoryEntry{Role: "user", Content: prompt})
@@ -640,6 +660,19 @@ func TestEngineEscCommand(t *testing.T) {
 	}()
 
 	time.Sleep(200 * time.Millisecond)
+
+	// Verify session/cancel (Cancel) was actually called, not just the Go
+	// context being abandoned. Check before Stop() clears the sessions map.
+	eng.sessionsMu.Lock()
+	ent, ok := eng.sessions["fake:u1"]
+	var cancelled bool
+	if ok && ent != nil && ent.session != nil {
+		if fs, ok := ent.session.(*fakeSession); ok {
+			cancelled = fs.cancelled
+		}
+	}
+	eng.sessionsMu.Unlock()
+
 	_ = eng.Stop()
 	<-done
 
@@ -647,8 +680,14 @@ func TestEngineEscCommand(t *testing.T) {
 	replies := append([]string(nil), p.replies...)
 	p.mu.Unlock()
 
+	// The only reply should be the /esc "cancelled" message. The Respond
+	// returns ErrCancelled (not an error reply), so no "Processing failed"
+	// message should appear.
 	if len(replies) != 1 || !strings.Contains(replies[0], "cancelled") {
-		t.Fatalf("replies = %v", replies)
+		t.Fatalf("replies = %v", len(replies))
+	}
+	if !cancelled {
+		t.Fatal("session.Cancel() was not called by /esc")
 	}
 }
 

@@ -310,6 +310,18 @@ func (s *Session) SessionID() string {
 	return s.sessionID
 }
 
+// Cancel sends a session/cancel notification to the agent, requesting it to
+// abort the current prompt turn. The agent will respond to the in-flight
+// session/prompt request with stopReason "cancelled".
+func (s *Session) Cancel() error {
+	if s.sessionID == "" {
+		return nil
+	}
+	return s.tr.notify("session/cancel", map[string]any{
+		"sessionId": s.sessionID,
+	})
+}
+
 func (s *Session) Respond(ctx context.Context, prompt string, images []core.ImageAttachment, files []core.FileAttachment, onEvent func(core.StreamEvent)) (string, []core.OutboundAttachment, error) {
 	if s.sessionID == "" {
 		return "", nil, fmt.Errorf("acp: no session id")
@@ -424,6 +436,10 @@ func (s *Session) Respond(ctx context.Context, prompt string, images []core.Imag
 	pr := <-resultCh
 	if pr.StopReason == "error" {
 		return "", nil, fmt.Errorf("acp session/prompt failed")
+	}
+	if pr.StopReason == "cancelled" {
+		slog.Info("acp: prompt turn cancelled", "session", s.sessionKey)
+		return "", nil, core.ErrCancelled
 	}
 	s.setUsage(pr)
 

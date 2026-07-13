@@ -350,8 +350,15 @@ func (e *Engine) processNormalMessage(ctx context.Context, cancel context.Cancel
 
 	e.setSessionStatus(msg.SessionKey, "idle")
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			// The turn was cancelled by /esc or shutdown; do not send an error reply.
+		if errors.Is(err, context.Canceled) || errors.Is(err, ErrCancelled) {
+			// The turn was cancelled by /esc or shutdown. Finalize the
+			// stream (partial text was already shown incrementally) and
+			// return silently — the user already saw the /esc reply.
+			if streaming {
+				if ferr := streamer.StreamReply(ctx, msg.ReplyCtx, "", true); ferr != nil {
+					slog.Error("failed to finish stream reply on cancel", "session", msg.SessionKey, "error", ferr)
+				}
+			}
 			return
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -568,15 +575,34 @@ func (e *Engine) handleHelpCommand(ctx context.Context, p Platform, msg *Message
 }
 
 func (e *Engine) handleEscCommand(ctx context.Context, p Platform, msg *Message) {
+	sessionKey := msg.SessionKey
+
 	e.activeTurnsMu.Lock()
-	cancel, ok := e.activeTurns[msg.SessionKey]
+	_, hasActive := e.activeTurns[sessionKey]
 	e.activeTurnsMu.Unlock()
-	if ok {
-		cancel()
-		_ = p.Reply(ctx, msg.ReplyCtx, "Current reply cancelled.")
+	if !hasActive {
+		_ = p.Reply(ctx, msg.ReplyCtx, "No reply is currently being generated.")
 		return
 	}
-	_ = p.Reply(ctx, msg.ReplyCtx, "No reply is currently being generated.")
+
+	// Send session/cancel to the agent so it stops generating and wasting
+	// tokens. The agent will respond to the in-flight session/prompt with
+	// stopReason "cancelled", which Respond surfaces as core.ErrCancelled.
+	e.sessionsMu.Lock()
+	ent, ok := e.sessions[sessionKey]
+	e.sessionsMu.Unlock()
+	if ok && ent != nil && ent.session != nil {
+		if err := ent.session.Cancel(); err != nil {
+			slog.Warn("esc: session/cancel failed, falling back to context cancel", "session", sessionKey, "error", err)
+			e.activeTurnsMu.Lock()
+			cancel, ok := e.activeTurns[sessionKey]
+			e.activeTurnsMu.Unlock()
+			if ok {
+				cancel()
+			}
+		}
+	}
+	_ = p.Reply(ctx, msg.ReplyCtx, "Current reply cancelled.")
 }
 
 func (e *Engine) handlePCommand(ctx context.Context, p Platform, msg *Message) {

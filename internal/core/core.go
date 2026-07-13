@@ -101,7 +101,15 @@ type AgentSession interface {
 	// SessionID returns the agent-side session identifier, used to resume the
 	// conversation after a restart.
 	SessionID() string
+	// Cancel requests the agent to abort the current prompt turn. It sends a
+	// session/cancel notification; the agent responds to the in-flight
+	// session/prompt with stopReason "cancelled".
+	Cancel() error
 }
+
+// ErrCancelled is returned by Respond when the prompt turn was cancelled by
+// the user (via /esc) or by the agent.
+var ErrCancelled = errors.New("prompt turn cancelled")
 
 // SessionInfo describes a historical agent session stored on disk by the
 // agent's own CLI (omp, claude, codex). The engine uses it for /ls and /sw.
