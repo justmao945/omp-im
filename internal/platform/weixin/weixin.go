@@ -92,11 +92,24 @@ func defaultDataDir() string {
 	return filepath.Join(home, ".omp-im")
 }
 
+// accountLabel returns the effective Weixin account label from options.
+// It prefers the top-level "name" over the legacy "account_id" option and
+// falls back to "default".
+func accountLabel(opts map[string]any) string {
+	if name, _ := opts["name"].(string); name != "" {
+		return name
+	}
+	if id, _ := opts["account_id"].(string); id != "" {
+		return id
+	}
+	return "default"
+}
+
 // New constructs a Weixin platform.
 // If options.token is provided, it is used directly. Otherwise the platform loads
 // a saved session from ~/.omp-im/weixin/<account>/session.json. If no session
 // exists, New returns an error and instructs the user to run `weixin login`.
-// Optional: base_url, allow_from, route_tag, account_id, proxy, token.
+// Optional: base_url, allow_from, route_tag, name, account_id, proxy, token.
 func New(opts map[string]any) (*Platform, error) {
 	token, _ := opts["token"].(string)
 	allowFrom, _ := opts["allow_from"].(string)
@@ -118,10 +131,7 @@ func New(opts map[string]any) (*Platform, error) {
 	}
 	cdnBaseURL = strings.TrimRight(strings.TrimSpace(cdnBaseURL), "/")
 	routeTag, _ := opts["route_tag"].(string)
-	accountLabel, _ := opts["account_id"].(string)
-	if accountLabel == "" {
-		accountLabel = "default"
-	}
+	accountLabel := accountLabel(opts)
 
 	stateDir := filepath.Join(defaultDataDir(), "weixin", sanitizePathSegment(accountLabel))
 
@@ -178,14 +188,11 @@ func New(opts map[string]any) (*Platform, error) {
 }
 
 // Login performs QR-code login for Weixin and persists the session to disk.
-// Optional: base_url, route_tag, account_id, proxy.
+// Optional: base_url, route_tag, name, account_id, proxy.
 func Login(ctx context.Context, opts map[string]any) error {
 	baseURL, _ := opts["base_url"].(string)
 	routeTag, _ := opts["route_tag"].(string)
-	accountLabel, _ := opts["account_id"].(string)
-	if accountLabel == "" {
-		accountLabel = "default"
-	}
+	accountLabel := accountLabel(opts)
 	stateDir := filepath.Join(defaultDataDir(), "weixin", sanitizePathSegment(accountLabel))
 
 	httpClient := &http.Client{Timeout: defaultAPITimeout}
@@ -218,10 +225,7 @@ func Login(ctx context.Context, opts map[string]any) error {
 
 // Logout removes the saved Weixin session for the given account.
 func Logout(opts map[string]any) error {
-	accountLabel, _ := opts["account_id"].(string)
-	if accountLabel == "" {
-		accountLabel = "default"
-	}
+	accountLabel := accountLabel(opts)
 	stateDir := filepath.Join(defaultDataDir(), "weixin", sanitizePathSegment(accountLabel))
 	statePath := filepath.Join(stateDir, defaultSessionFile)
 	if err := os.Remove(statePath); err != nil && !os.IsNotExist(err) {

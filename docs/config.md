@@ -17,6 +17,7 @@
   "platforms": [
     {
       "type": "weixin",
+      "name": "default",
       "options": {
         "token": "",
         "allow_from": "*"
@@ -47,6 +48,16 @@
 - `name` — unique project identifier.
 - `work_dir` — absolute or relative path used as the agent's working directory. `omp-im` creates this directory on startup if it does not exist.
 
+### PlatformConfig
+
+```json
+{ "name": "default", "type": "weixin", "options": {} }
+```
+
+- `name` — optional identifier for this platform instance. For Weixin, it is used as the account name and state directory name.
+- `type` — platform type: `weixin`, `wecom`, or `http`.
+- `options` — platform-specific options.
+
 ### Weixin options
 
 | Option | Type | Description |
@@ -55,7 +66,7 @@
 | `base_url` | `string` | Optional iLink gateway base URL. Defaults to `https://ilinkai.weixin.qq.com`. |
 | `cdn_base_url` | `string` | Optional CDN base URL for media. Defaults to `https://novac2c.cdn.weixin.qq.com/c2c`. |
 | `allow_from` | `string` | Comma-separated list of allowed Weixin user IDs. `"*"` or empty allows everyone. |
-| `account_id` | `string` | Account label used in the default state directory. Defaults to `default`. |
+| `account_id` | `string` | Legacy account label used in the state directory. Use the top-level `name` field instead when possible. |
 | `state_dir` | `string` | Override the default Weixin state directory. |
 | `proxy` | `string` | Optional HTTP proxy for the iLink gateway. |
 | `route_tag` | `string` | Optional route tag passed to the iLink API. |
@@ -85,4 +96,34 @@ If `token` is empty, run:
 omp-im weixin login
 ```
 
-Scan the terminal QR code with WeChat. The login state is saved to `~/.omp-im/weixin/<account_id>/session.json`.
+Scan the terminal QR code with WeChat. The login state is saved to `~/.omp-im/weixin/<name>/session.json`.
+
+## Multiple Weixin accounts
+
+Add one platform entry per account, each with a unique `name`. The server runs all configured accounts simultaneously, and their state directories are isolated.
+
+```json
+{
+  "platforms": [
+    {
+      "type": "weixin",
+      "name": "work",
+      "options": { "allow_from": "*" }
+    },
+    {
+      "type": "weixin",
+      "name": "personal",
+      "options": { "allow_from": "*" }
+    }
+  ]
+}
+```
+
+Log in to a specific account by name:
+
+```bash
+omp-im weixin login work
+omp-im weixin login personal
+```
+
+If only one Weixin account is configured, the name may be omitted.

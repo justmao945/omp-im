@@ -13,6 +13,7 @@
   "platforms": [
     {
       "type": "weixin",
+      "name": "default",
       "options": {
         "allow_from": "*",
         "footer": true

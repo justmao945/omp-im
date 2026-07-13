@@ -36,8 +36,22 @@ type DefaultsConfig struct {
 
 // PlatformConfig configures a single IM platform.
 type PlatformConfig struct {
+	Name    string         `json:"name,omitempty"`
 	Type    string         `json:"type"`
 	Options map[string]any `json:"options"`
+}
+
+// WeixinAccount returns the effective Weixin account label for this platform.
+// It reads the top-level "name" first, then the "account_id" option, and
+// finally falls back to "default".
+func (p PlatformConfig) WeixinAccount() string {
+	if p.Name != "" {
+		return p.Name
+	}
+	if id, _ := p.Options["account_id"].(string); id != "" {
+		return id
+	}
+	return "default"
 }
 
 // DefaultPath returns the default configuration path (~/.omp-im/config.json).
@@ -127,12 +141,20 @@ func (c *Config) Validate() error {
 	if len(c.Platforms) == 0 {
 		return fmt.Errorf("at least one platform is required")
 	}
+	weixinAccounts := make(map[string]int)
 	for i, p := range c.Platforms {
 		switch p.Type {
 		case "weixin", "http", "wecom":
 			// ok
 		default:
 			return fmt.Errorf("platforms[%d] unsupported type %q", i, p.Type)
+		}
+		if p.Type == "weixin" {
+			account := p.WeixinAccount()
+			if prev, ok := weixinAccounts[account]; ok {
+				return fmt.Errorf("platforms[%d] and platforms[%d] have duplicate weixin account name %q", prev, i, account)
+			}
+			weixinAccounts[account] = i
 		}
 	}
 	return nil

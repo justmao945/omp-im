@@ -4,6 +4,26 @@ import (
 	"testing"
 )
 
+func TestAccountLabel(t *testing.T) {
+	cases := []struct {
+		name string
+		opts map[string]any
+		want string
+	}{
+		{"name only", map[string]any{"name": "work"}, "work"},
+		{"name overrides account_id", map[string]any{"name": "work", "account_id": "personal"}, "work"},
+		{"account_id fallback", map[string]any{"account_id": "personal"}, "personal"},
+		{"default", map[string]any{}, "default"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := accountLabel(c.opts); got != c.want {
+				t.Errorf("accountLabel(%v) = %q, want %q", c.opts, got, c.want)
+			}
+		})
+	}
+}
+
 func TestAllowList(t *testing.T) {
 	cases := []struct {
 		allow string

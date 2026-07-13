@@ -114,3 +114,68 @@ func TestProjectLookup(t *testing.T) {
 		t.Fatal("expected missing project lookup to fail")
 	}
 }
+
+func TestPlatformConfigWeixinAccount(t *testing.T) {
+	cases := []struct {
+		name string
+		pc   PlatformConfig
+		want string
+	}{
+		{"name only", PlatformConfig{Name: "work", Type: "weixin", Options: map[string]any{}}, "work"},
+		{"name overrides account_id", PlatformConfig{Name: "work", Type: "weixin", Options: map[string]any{"account_id": "personal"}}, "work"},
+		{"account_id fallback", PlatformConfig{Type: "weixin", Options: map[string]any{"account_id": "personal"}}, "personal"},
+		{"default", PlatformConfig{Type: "weixin", Options: map[string]any{}}, "default"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.pc.WeixinAccount(); got != c.want {
+				t.Errorf("WeixinAccount() = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestValidateDuplicateWeixinAccount(t *testing.T) {
+	cfg := &Config{
+		Agents:   []string{"omp"},
+		Projects: []ProjectConfig{{Name: "p1"}},
+		Defaults: DefaultsConfig{Agent: "omp", Project: "p1"},
+		Platforms: []PlatformConfig{
+			{Name: "work", Type: "weixin", Options: map[string]any{}},
+			{Name: "work", Type: "weixin", Options: map[string]any{}},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for duplicate weixin account name")
+	}
+}
+
+func TestValidateDuplicateWeixinAccountViaOptions(t *testing.T) {
+	cfg := &Config{
+		Agents:   []string{"omp"},
+		Projects: []ProjectConfig{{Name: "p1"}},
+		Defaults: DefaultsConfig{Agent: "omp", Project: "p1"},
+		Platforms: []PlatformConfig{
+			{Type: "weixin", Options: map[string]any{"account_id": "work"}},
+			{Type: "weixin", Options: map[string]any{"account_id": "work"}},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for duplicate weixin account name via options")
+	}
+}
+
+func TestValidateMultipleWeixinAccounts(t *testing.T) {
+	cfg := &Config{
+		Agents:   []string{"omp"},
+		Projects: []ProjectConfig{{Name: "p1"}},
+		Defaults: DefaultsConfig{Agent: "omp", Project: "p1"},
+		Platforms: []PlatformConfig{
+			{Name: "work", Type: "weixin", Options: map[string]any{}},
+			{Name: "personal", Type: "weixin", Options: map[string]any{}},
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate(): %v", err)
+	}
+}
