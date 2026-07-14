@@ -41,111 +41,62 @@ func TestSplitTextChunks(t *testing.T) {
 func TestBuildStreamContent(t *testing.T) {
 	cases := []struct {
 		name           string
-		thinking       string
-		tool           string
+		display        string
 		finished       bool
 		setup          func(*replyContext)
 		wantContains   []string
 		wantNotContain string
 	}{
 		{
-			name: "processing before thinking",
-			setup: func(rc *replyContext) {
-				rc.turnStart = time.Now().Add(-3 * time.Second)
-			},
-			wantContains: []string{"Working", "3s"},
+			name:           "default empty when no body text",
+			setup:          func(rc *replyContext) { rc.turnStart = time.Now().Add(-3 * time.Second) },
+			wantNotContain: "Working",
 		},
 		{
-			name:     "processing hidden when body arrives",
-			thinking: "concise",
-			tool:     "concise",
-			setup: func(rc *replyContext) {
-				rc.turnStart = time.Now().Add(-3 * time.Second)
-				rc.streamText = "body text"
-			},
-			wantContains:   []string{"body text"},
-			wantNotContain: "处理中",
+			name:     "default shows body text only",
+			setup:    func(rc *replyContext) { rc.streamText = "body text" },
+			wantContains: []string{"body text"},
 		},
 		{
-			name:     "concise thinking",
-			thinking: "concise",
-			setup: func(rc *replyContext) {
-				rc.thinkingText = "analyzing"
-				rc.turnStart = time.Now().Add(-time.Second)
-			},
-			wantContains: []string{"Thinking...", "1s"},
+			name:           "default hides thinking",
+			setup:          func(rc *replyContext) { rc.thinkingText = "analyzing" },
+			wantNotContain: "Thinking",
 		},
 		{
-			name:     "detailed thinking",
-			thinking: "detailed",
-			setup: func(rc *replyContext) {
-				rc.thinkingText = "analyzing"
-				rc.streamBody = []streamSection{{kind: "thinking", text: "analyzing"}}
-			},
+			name:           "default hides tool status",
+			setup:          func(rc *replyContext) { rc.toolName = "git status" },
+			wantNotContain: "git status",
+		},
+		{
+			name:     "full shows thinking",
+			display:  "full",
+			setup:    func(rc *replyContext) { rc.streamBody = []streamSection{{kind: "thinking", text: "analyzing"}} },
 			wantContains:   []string{"> analyzing"},
 			wantNotContain: "Thinking...",
 		},
 		{
-			name:     "thinking off",
-			thinking: "off",
+			name:    "full shows tool",
+			display: "full",
 			setup: func(rc *replyContext) {
-				rc.thinkingText = "analyzing"
-			},
-			wantNotContain: "Thinking...",
-		},
-		{
-			name: "tool running concise",
-			tool: "concise",
-			setup: func(rc *replyContext) {
-				rc.toolName = "git status"
-				rc.toolStart = time.Now().Add(-2 * time.Second)
-				rc.toolHistory = []toolRecord{{
-					name:  "git status",
-					input: "{\"path\":\"/tmp\"}",
-					start: time.Now().Add(-2 * time.Second),
-				}}
-			},
-			wantContains: []string{"git status", "2s", "path=/tmp"},
-		},
-		{
-			name: "tool running detailed",
-			tool: "detailed",
-			setup: func(rc *replyContext) {
-				rc.toolName = "ls"
-				rc.toolStart = time.Now().Add(-2 * time.Second)
-				rc.toolHistory = []toolRecord{{
-					name:  "ls",
-					input: "{\"path\":\"/tmp\"}",
-					start: time.Now().Add(-2 * time.Second),
-				}}
 				rc.streamBody = []streamSection{{kind: "tool", text: "🔧 ls\npath=/tmp"}}
 			},
 			wantContains: []string{"> 🔧 ls", "> path"},
 		},
 		{
-			name:     "detailed thinking preserved with body",
-			thinking: "detailed",
+			name:    "full preserves thinking and body in order",
+			display: "full",
 			setup: func(rc *replyContext) {
-				rc.thinkingText = "analyzing"
-				rc.streamText = "body text"
 				rc.streamBody = []streamSection{
 					{kind: "thinking", text: "analyzing"},
 					{kind: "text", text: "body text"},
 				}
 			},
 			wantContains:   []string{"body text", "> analyzing"},
-			wantNotContain: "Thinking...",
 		},
 		{
-			name: "detailed tool preserved with body",
-			tool: "detailed",
+			name:    "full preserves tool and body in order",
+			display: "full",
 			setup: func(rc *replyContext) {
-				rc.toolName = "ls"
-				rc.toolHistory = []toolRecord{{
-					name:  "ls",
-					input: "{\"path\":\"/tmp\"}",
-				}}
-				rc.streamText = "body text"
 				rc.streamBody = []streamSection{
 					{kind: "tool", text: "🔧 ls\npath=/tmp"},
 					{kind: "text", text: "body text"},
@@ -154,96 +105,8 @@ func TestBuildStreamContent(t *testing.T) {
 			wantContains: []string{"body text", "> 🔧 ls", "> path=/tmp"},
 		},
 		{
-			name: "tool off",
-			tool: "off",
-			setup: func(rc *replyContext) {
-				rc.toolName = "git status"
-			},
-			wantNotContain: "git status",
-		},
-		{
-			name:     "status hidden when body arrives",
-			thinking: "concise",
-			tool:     "concise",
-			setup: func(rc *replyContext) {
-				rc.thinkingText = "analyzing"
-				rc.toolName = "git status"
-				rc.streamText = "body text"
-			},
-			wantContains:   []string{"body text"},
-			wantNotContain: "git status",
-		},
-		{
-			name:     "finish footer with context",
-			thinking: "concise",
-			tool:     "concise",
-			finished: true,
-			setup: func(rc *replyContext) {
-				rc.turnStart = time.Now().Add(-10 * time.Second)
-				rc.thinkingEnd = time.Now().Add(-8 * time.Second)
-				rc.toolCount = 2
-				rc.toolTotalDuration = 5 * time.Second
-				rc.turnEnd = time.Now()
-				rc.streamText = "result text"
-				rc.contextUsed = 53000
-				rc.contextSize = 200000
-			},
-			wantContains: []string{
-				"result text",
-				"⏱️ 10s",
-				"🧠 26%",
-			},
-			wantNotContain: "thinking",
-		},
-		{
-			name:     "finish footer",
-			thinking: "concise",
-			tool:     "concise",
-			finished: true,
-			setup: func(rc *replyContext) {
-				rc.turnStart = time.Now().Add(-10 * time.Second)
-				rc.thinkingEnd = time.Now().Add(-8 * time.Second)
-				rc.toolCount = 2
-				rc.toolTotalDuration = 5 * time.Second
-				rc.turnEnd = time.Now()
-				rc.streamText = "result text"
-			},
-			wantContains: []string{
-				"result text",
-				"⏱️ 10s",
-			},
-			wantNotContain: "thinking",
-		},
-		{
-			name:     "detailed tool footer summary only",
-			thinking: "off",
-			tool:     "detailed",
-			finished: true,
-			setup: func(rc *replyContext) {
-				rc.turnStart = time.Now().Add(-10 * time.Second)
-				rc.toolCount = 1
-				rc.toolTotalDuration = 3 * time.Second
-				rc.turnEnd = time.Now()
-				rc.streamText = "result"
-				rc.streamBody = []streamSection{
-					{kind: "text", text: "result"},
-					{kind: "tool", text: "🔧 cat\npath=/etc/passwd"},
-				}
-				rc.toolHistory = []toolRecord{{
-					name:   "cat",
-					input:  "{\"path\":\"/etc/passwd\"}",
-					output: "root:x:0:0",
-					start:  time.Now().Add(-5 * time.Second),
-					end:    time.Now().Add(-2 * time.Second),
-				}}
-			},
-			wantContains:   []string{"result", "⏱️ 10s", "🛠️ 1"},
-			wantNotContain: "root:x",
-		},
-		{
-			name:     "thinking split around tools",
-			thinking: "detailed",
-			tool:     "detailed",
+			name:    "full thinking split around tools",
+			display: "full",
 			setup: func(rc *replyContext) {
 				rc.streamBody = []streamSection{
 					{kind: "thinking", text: "step 1"},
@@ -252,39 +115,36 @@ func TestBuildStreamContent(t *testing.T) {
 					{kind: "thinking", text: "step 3"},
 				}
 			},
-			wantContains: []string{
-				"> step 1",
-				"> step 2",
-				"> step 3",
-				"> 🔧 ls",
-				"> path=/tmp",
-			},
-			wantNotContain: "> step 1\n\n> step 2\n\n> step 3",
+			wantContains: []string{"> step 1", "> step 2", "> step 3", "> 🔧 ls", "> path=/tmp"},
 		},
 		{
-			name:     "detailed tool result hidden",
-			thinking: "off",
-			tool:     "detailed",
+			name:     "default footer with context",
+			finished: true,
+			setup: func(rc *replyContext) {
+				rc.turnStart = time.Now().Add(-10 * time.Second)
+				rc.toolCount = 2
+				rc.turnEnd = time.Now()
+				rc.streamText = "result text"
+				rc.contextUsed = 53000
+				rc.contextSize = 200000
+			},
+			wantContains:   []string{"result text", "⏱️ 10s", "🧠 26%"},
+		},
+		{
+			name:     "full footer with tool count",
+			display:  "full",
 			finished: true,
 			setup: func(rc *replyContext) {
 				rc.turnStart = time.Now().Add(-10 * time.Second)
 				rc.toolCount = 1
-				rc.toolTotalDuration = 3 * time.Second
 				rc.turnEnd = time.Now()
 				rc.streamText = "result"
 				rc.streamBody = []streamSection{
 					{kind: "text", text: "result"},
 					{kind: "tool", text: "🔧 cat\npath=/etc/passwd"},
 				}
-				rc.toolHistory = []toolRecord{{
-					name:   "cat",
-					input:  "{\"path\":\"/etc/passwd\"}",
-					output: "root:x:0:0",
-					start:  time.Now().Add(-5 * time.Second),
-					end:    time.Now().Add(-2 * time.Second),
-				}}
 			},
-			wantContains:   []string{"result", "🔧 cat", "path=/etc/passwd"},
+			wantContains:   []string{"result", "⏱️ 10s", "🛠️ 1", "🔧 cat"},
 			wantNotContain: "root:x",
 		},
 	}
@@ -294,7 +154,7 @@ func TestBuildStreamContent(t *testing.T) {
 			if tc.setup != nil {
 				tc.setup(rc)
 			}
-			got := buildStreamContent(rc, tc.thinking, tc.tool, tc.finished, true)
+			got := buildStreamContent(rc, tc.display, tc.finished, true)
 			for _, want := range tc.wantContains {
 				if !strings.Contains(got, want) {
 					t.Fatalf("content missing %q:\n%s", want, got)
@@ -310,19 +170,15 @@ func TestBuildStreamContent(t *testing.T) {
 func TestStreamFooter(t *testing.T) {
 	cases := []struct {
 		name           string
-		thinking       string
-		tool           string
+		display        string
 		setup          func(*replyContext)
 		wantContains   []string
 		wantNotContain string
 	}{
 		{
-			name:     "thinking and tools",
-			thinking: "concise",
-			tool:     "concise",
+			name:    "default footer",
 			setup: func(rc *replyContext) {
 				rc.turnStart = time.Now().Add(-10 * time.Second)
-				rc.thinkingEnd = time.Now().Add(-8 * time.Second)
 				rc.toolCount = 2
 				rc.toolTotalDuration = 5 * time.Second
 				rc.turnEnd = time.Now()
@@ -330,38 +186,15 @@ func TestStreamFooter(t *testing.T) {
 			wantContains: []string{"⏱️ 10s"},
 		},
 		{
-			name:     "tool off hides tool summary",
-			thinking: "concise",
-			tool:     "off",
-			setup: func(rc *replyContext) {
-				rc.turnStart = time.Now().Add(-10 * time.Second)
-				rc.thinkingEnd = time.Now().Add(-8 * time.Second)
-				rc.toolCount = 2
-				rc.toolTotalDuration = 5 * time.Second
-				rc.turnEnd = time.Now()
-			},
-			wantContains:   []string{"⏱️ 10s"},
-			wantNotContain: "tools",
-		},
-		{
-			name:     "detailed tool footer summary only",
-			thinking: "off",
-			tool:     "detailed",
+			name:    "full footer with tool count",
+			display: "full",
 			setup: func(rc *replyContext) {
 				rc.turnStart = time.Now().Add(-10 * time.Second)
 				rc.toolCount = 1
 				rc.toolTotalDuration = 3 * time.Second
 				rc.turnEnd = time.Now()
-				rc.toolHistory = []toolRecord{{
-					name:   "cat",
-					input:  "{\"path\":\"/etc/passwd\"}",
-					output: "root:x:0:0",
-					start:  time.Now().Add(-5 * time.Second),
-					end:    time.Now().Add(-2 * time.Second),
-				}}
 			},
-			wantContains:   []string{"⏱️ 10s"},
-			wantNotContain: "root:x",
+			wantContains:   []string{"⏱️ 10s", "🛠️ 1"},
 		},
 	}
 	for _, tc := range cases {
@@ -370,7 +203,7 @@ func TestStreamFooter(t *testing.T) {
 			if tc.setup != nil {
 				tc.setup(rc)
 			}
-			got := buildStreamFooter(rc, tc.thinking, tc.tool)
+			got := buildStreamFooter(rc, tc.display)
 			for _, want := range tc.wantContains {
 				if !strings.Contains(got, want) {
 					t.Fatalf("footer missing %q:\n%s", want, got)

@@ -18,7 +18,7 @@ const maxStreamContentBytes = 20480
 
 // sendTextReply sends a passive text reply to the chat that triggered the inbound message.
 // Long text is split into multiple stream chunks with the same stream id.
-func (p *Platform) sendTextReply(rc *replyContext, text string) error {
+func (p *Platform) sendTextReply(ctx context.Context, rc *replyContext, text string) error {
 	if rc == nil || rc.chatid == "" {
 		return fmt.Errorf("wecom: chatid is empty")
 	}
@@ -37,7 +37,7 @@ func (p *Platform) sendTextReply(rc *replyContext, text string) error {
 				"content": chunk,
 			},
 		}
-		if err := p.respond(rc.reqID, body); err != nil {
+		if err := p.respond(ctx, rc.reqID, body); err != nil {
 			return err
 		}
 	}
@@ -72,6 +72,14 @@ func (p *Platform) StreamReply(ctx context.Context, replyCtx any, delta string, 
 		rc.finished = true
 	}
 
+	// Initial empty-delta frame: send content="" with finish=false to create
+	// the message bubble and trigger the WeCom client's typing animation.
+	// Subsequent renders use the status line / body text.
+	if delta == "" && !finished && !rc.sentInitialEmpty && rc.streamText == "" && rc.thinkingText == "" && rc.toolName == "" {
+		rc.sentInitialEmpty = true
+		return p.renderStreamEmpty(ctx, rc)
+	}
+
 	if rc.thinkingText != "" && rc.thinkingEnd.IsZero() {
 		rc.thinkingEnd = time.Now()
 	}
@@ -79,23 +87,25 @@ func (p *Platform) StreamReply(ctx context.Context, replyCtx any, delta string, 
 	// ACP chunks are deltas, but the WeCom stream protocol expects each frame
 	// to contain the full message content so far (refresh mode). Detect if the
 	// agent already sent cumulative text and fall back to appending raw deltas.
-	if rc.streamText == "" {
-		rc.streamText = delta
-	} else if strings.HasPrefix(delta, rc.streamText) {
-		rc.streamText = delta
-	} else {
-		rc.streamText += delta
-	}
-
-	// Keep the detailed-mode stream body in the same order as events arrive.
-	if idx := streamSectionIndex(rc.streamBody, "text"); idx == -1 {
-		rc.streamBody = append(rc.streamBody, streamSection{kind: "text", text: delta})
-	} else {
-		existing := rc.streamBody[idx].text
-		if strings.HasPrefix(delta, existing) {
-			rc.streamBody[idx].text = delta
+	if delta != "" {
+		if rc.streamText == "" {
+			rc.streamText = delta
+		} else if strings.HasPrefix(delta, rc.streamText) {
+			rc.streamText = delta
 		} else {
-			rc.streamBody[idx].text += delta
+			rc.streamText += delta
+		}
+
+		// Keep the detailed-mode stream body in the same order as events arrive.
+		if idx := streamSectionIndex(rc.streamBody, "text"); idx == -1 {
+			rc.streamBody = append(rc.streamBody, streamSection{kind: "text", text: delta})
+		} else {
+			existing := rc.streamBody[idx].text
+			if strings.HasPrefix(delta, existing) {
+				rc.streamBody[idx].text = delta
+			} else {
+				rc.streamBody[idx].text += delta
+			}
 		}
 	}
 
@@ -172,7 +182,7 @@ func (p *Platform) StreamEvent(ctx context.Context, replyCtx any, ev core.Stream
 			start: time.Now(),
 		})
 		toolText := fmt.Sprintf("🔧 %s", ev.Tool)
-		if preview := formatToolInputOneLine(ev.ToolInput); preview != "" {
+		if preview := formatToolInputOneLineFiltered(ev.ToolInput, ev.Tool); preview != "" {
 			toolText += "\n" + preview
 		}
 		rc.streamBody = append(rc.streamBody, streamSection{kind: "tool", text: toolText})
@@ -227,6 +237,31 @@ func (p *Platform) startStreamTicker(ctx context.Context, rc *replyContext) {
 	}()
 }
 
+// renderStreamEmpty sends a stream frame with empty content and finish=false.
+// This creates the message bubble in the WeCom client and triggers the
+// native "typing" animation (three dots) before any text arrives.
+func (p *Platform) renderStreamEmpty(ctx context.Context, rc *replyContext) error {
+	body := map[string]interface{}{
+		"msgtype": "stream",
+		"stream": map[string]interface{}{
+			"id":      rc.streamID,
+			"finish":  false,
+			"content": "",
+		},
+	}
+	if rc.reqID != "" {
+		if err := p.respond(ctx, rc.reqID, body); err != nil {
+			return err
+		}
+	} else {
+		if err := p.sendActiveMessage(ctx, rc.chatid, rc.chattype, body); err != nil {
+			return err
+		}
+	}
+	rc.lastRender = time.Now()
+	return nil
+}
+
 // renderStream builds the current stream content and sends it to WeCom.
 // Non-final updates are throttled to at most one render per second.
 func (p *Platform) renderStream(ctx context.Context, rc *replyContext, finished bool) error {
@@ -246,29 +281,59 @@ func (p *Platform) renderStream(ctx context.Context, rc *replyContext, finished 
 		rc.stopTicker = nil
 	}
 
-	content := buildStreamContent(rc, p.cfg.thinkingDisplay, p.cfg.toolDisplay, finished, p.cfg.footer)
+	content := buildStreamContent(rc, p.cfg.display, finished, p.cfg.footer)
+
+	// If content fits in one frame, send it directly.
+	if len(content) <= maxStreamContentBytes {
+		return p.sendStreamFrame(ctx, rc, rc.streamID, content, finished)
+	}
+
+	// Content exceeds 20KB: finalize the current stream and start new ones.
+	// Each chunk becomes its own complete message bubble (finish=true).
+	// If this is the final render, the last chunk carries finish=finished.
+	chunks := splitTextChunks(content, maxStreamContentBytes)
+	for i, chunk := range chunks {
+		sid := rc.streamID
+		if i > 0 {
+			sid = generateReqID()
+		}
+		chunkFinish := true
+		if i == len(chunks)-1 {
+			chunkFinish = finished
+		}
+		if err := p.sendStreamFrame(ctx, rc, sid, chunk, chunkFinish); err != nil {
+			return err
+		}
+	}
+	// Point rc.streamID at a new stream so the next render continues fresh.
+	if !finished {
+		rc.streamID = generateReqID()
+	}
+	rc.lastRender = time.Now()
+	slog.Debug("wecom: stream split", "chunks", len(chunks), "finished", finished)
+	return nil
+}
+
+// sendStreamFrame sends a single stream frame and updates lastRender.
+func (p *Platform) sendStreamFrame(ctx context.Context, rc *replyContext, streamID, content string, finish bool) error {
 	body := map[string]interface{}{
 		"msgtype": "stream",
 		"stream": map[string]interface{}{
-			"id":      rc.streamID,
-			"finish":  finished,
+			"id":      streamID,
+			"finish":  finish,
 			"content": content,
 		},
 	}
-
 	if rc.reqID != "" {
-		if err := p.respond(rc.reqID, body); err != nil {
+		if err := p.respond(ctx, rc.reqID, body); err != nil {
 			return err
 		}
 	} else {
-		if err := p.sendActiveMessage(rc.chatid, rc.chattype, body); err != nil {
+		if err := p.sendActiveMessage(ctx, rc.chatid, rc.chattype, body); err != nil {
 			return err
 		}
 	}
 	rc.lastRender = time.Now()
-	if finished {
-		slog.Debug("wecom: finished stream reply")
-	}
 	return nil
 }
 
@@ -307,45 +372,31 @@ func quoteText(text string) string {
 }
 
 // buildStreamContent assembles the visible text with optional status line and footer.
-// In concise mode, the status line is shown while no body text has arrived, then
-// replaced by the body. In detailed mode, text, thinking, and tool output are kept
-// in the order they arrived and never overwritten.
-func buildStreamContent(rc *replyContext, thinkingDisplay, toolDisplay string, finished, footerEnabled bool) string {
+// When display is empty, only body text is shown (the "..." animation fills the gap).
+// When display is "full", thinking, tool calls, and text are shown in arrival order.
+func buildStreamContent(rc *replyContext, display string, finished, footerEnabled bool) string {
 	var parts []string
 
-	// Detailed mode: render stream sections in chronological order.
-	if thinkingDisplay == "detailed" || toolDisplay == "detailed" {
+	if display == "full" {
 		for _, section := range rc.streamBody {
 			switch section.kind {
 			case "text":
 				parts = append(parts, section.text)
 			case "thinking":
-				if thinkingDisplay == "detailed" {
-					parts = append(parts, quoteText(section.text))
-				}
+				parts = append(parts, quoteText(section.text))
 			case "tool":
-				if toolDisplay == "detailed" {
-					parts = append(parts, quoteText(section.text))
-				}
+				parts = append(parts, quoteText(section.text))
 			}
 		}
-
-		// If nothing has been rendered yet, fall back to the concise status line.
-		if len(parts) == 0 {
-			parts = append(parts, buildConciseStatusLine(rc, thinkingDisplay, toolDisplay)...)
-		}
 	} else {
-		// Concise mode: show body text when available, otherwise a status line.
+		// Default mode: show body text only; empty means "..." animation.
 		if rc.streamText != "" {
 			parts = append(parts, rc.streamText)
-		} else {
-			parts = append(parts, buildConciseStatusLine(rc, thinkingDisplay, toolDisplay)...)
 		}
 	}
 
-	// Footer at the end of the turn.
 	if finished && footerEnabled {
-		if f := buildStreamFooter(rc, thinkingDisplay, toolDisplay); f != "" {
+		if f := buildStreamFooter(rc, display); f != "" {
 			parts = append(parts, f)
 		}
 	}
@@ -353,42 +404,9 @@ func buildStreamContent(rc *replyContext, thinkingDisplay, toolDisplay string, f
 	return strings.Join(parts, "\n\n")
 }
 
-// buildConciseStatusLine returns the status-line parts shown while no body text exists.
-func buildConciseStatusLine(rc *replyContext, thinkingDisplay, toolDisplay string) []string {
-	var parts []string
-
-	switch {
-	case rc.toolName != "" && toolDisplay != "off":
-		elapsed := ""
-		if !rc.toolStart.IsZero() {
-			elapsed = fmt.Sprintf(" %s", formatDuration(time.Since(rc.toolStart)))
-		}
-		line := fmt.Sprintf("🔧 %s", rc.toolName)
-		if rc.toolHistory != nil {
-			if n := len(rc.toolHistory); n > 0 {
-				if preview := formatToolInputOneLine(rc.toolHistory[n-1].input); preview != "" {
-					line += ": " + preview
-				}
-			}
-		}
-		line += elapsed
-		parts = append(parts, line)
-	case rc.thinkingText != "" && thinkingDisplay != "off":
-		elapsed := ""
-		if !rc.turnStart.IsZero() {
-			elapsed = fmt.Sprintf(" %s", formatDuration(time.Since(rc.turnStart)))
-		}
-		parts = append(parts, fmt.Sprintf("🤔 Thinking...%s", elapsed))
-	case !rc.turnStart.IsZero():
-		parts = append(parts, fmt.Sprintf("⚙️ Working... %s", formatDuration(time.Since(rc.turnStart))))
-	}
-
-	return parts
-}
-
 // buildStreamFooter builds the summary footer shown at the end of a turn.
 // It shows total elapsed time and context usage: ⏱️ Xs · 🧠 X%.
-func buildStreamFooter(rc *replyContext, thinkingDisplay, toolDisplay string) string {
+func buildStreamFooter(rc *replyContext, display string) string {
 	var d time.Duration
 	if !rc.turnEnd.IsZero() && rc.turnEnd.After(rc.turnStart) {
 		d = rc.turnEnd.Sub(rc.turnStart)
@@ -397,18 +415,17 @@ func buildStreamFooter(rc *replyContext, thinkingDisplay, toolDisplay string) st
 	} else {
 		return ""
 	}
-	showTools := thinkingDisplay == "detailed" || toolDisplay == "detailed"
 	return core.BuildFooter(core.FooterInfo{
 		Duration:    d,
 		ContextUsed: rc.contextUsed,
 		ContextSize: rc.contextSize,
 		ToolCount:   rc.toolCount,
-		ShowTools:   showTools,
+		ShowTools:   display == "full",
 	})
 }
 
 // buildToolDetails renders a detailed log of every tool call for the footer.
-// Currently unused: footer only shows the summary line regardless of toolDisplay.
+// Currently unused: footer only shows the summary line regardless of display mode.
 func buildToolDetails(rc *replyContext) string {
 	if len(rc.toolHistory) == 0 {
 		return ""
@@ -489,6 +506,47 @@ func formatToolInputOneLine(input string) string {
 	}
 }
 
+// formatToolInputOneLineFiltered is like formatToolInputOneLine but skips
+// key=value pairs whose value already appears in the tool display name,
+// avoiding redundant information in the stream output.
+func formatToolInputOneLineFiltered(input string, toolDisplay string) string {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return ""
+	}
+	raw, ok := parseToolInputJSON(input)
+	if !ok {
+		// Non-JSON input: return first line only if not in toolDisplay.
+		line := strings.SplitN(input, "\n", 2)[0]
+		if strings.Contains(toolDisplay, line) {
+			return ""
+		}
+		return line
+	}
+	flat := flattenToolInput(raw)
+	keys := make([]string, 0, len(flat))
+	for k := range flat {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if k == "command" || k == "args" {
+			// These are already represented via toolCallCommand in the display.
+			if strings.Contains(toolDisplay, fmt.Sprintf("%v", flat[k])) {
+				continue
+			}
+		}
+		val := fmt.Sprintf("%v", flat[k])
+		// Skip if the value is already part of the tool display name.
+		if val != "" && strings.Contains(toolDisplay, val) {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s", k, val))
+	}
+	return strings.Join(parts, " ")
+}
+
 func flattenToolInput(obj map[string]any) map[string]any {
 	flat := make(map[string]any, len(obj))
 	for k, v := range obj {
@@ -560,6 +618,22 @@ func plural(n int) string {
 	return "s"
 }
 
+// truncateUTF8 truncates s to at most maxBytes bytes, never splitting a multi-byte rune.
+func truncateUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	// Walk backwards from the limit to find a valid rune boundary.
+	end := maxBytes
+	for end > 0 && !utf8.ValidString(s[:end]) {
+		end--
+	}
+	if end <= 0 {
+		return ""
+	}
+	return s[:end]
+}
+
 // splitTextChunks splits text into chunks so each chunk is at most maxBytes bytes
 // when encoded as UTF-8. It never splits a multi-byte rune.
 func splitTextChunks(text string, maxBytes int) []string {
@@ -588,8 +662,9 @@ func splitTextChunks(text string, maxBytes int) []string {
 	return chunks
 }
 
-// respond sends an aibot_respond_msg frame using the original inbound req_id.
-func (p *Platform) respond(reqID string, body map[string]interface{}) error {
+// respond sends an aibot_respond_msg frame using the original inbound req_id
+// and waits for the server ack before returning.
+func (p *Platform) respond(ctx context.Context, reqID string, body map[string]interface{}) error {
 	payload := map[string]interface{}{
 		"cmd": "aibot_respond_msg",
 		"headers": map[string]string{
@@ -598,15 +673,21 @@ func (p *Platform) respond(reqID string, body map[string]interface{}) error {
 		"body": body,
 	}
 
-	if err := p.wsClient.send(payload); err != nil {
+	if err := p.wsClient.writeAndWaitAck(ctx, payload, reqID); err != nil {
 		return err
 	}
-	slog.Debug("wecom: sent reply")
+	if stream, ok := body["stream"].(map[string]interface{}); ok {
+		content, _ := stream["content"].(string)
+		finish, _ := stream["finish"].(bool)
+		slog.Info("wecom: sent stream frame", "req_id", reqID, "finish", finish, "content_len", len(content), "content_preview", truncateStr(content, 50))
+	} else {
+		slog.Debug("wecom: sent reply", "req_id", reqID, "msgtype", body["msgtype"])
+	}
 	return nil
 }
 
 // sendActiveMessage is a fallback for active push (aibot_send_msg) when passive reply is not possible.
-func (p *Platform) sendActiveMessage(chatid, chattype string, body map[string]interface{}) error {
+func (p *Platform) sendActiveMessage(ctx context.Context, chatid, chattype string, body map[string]interface{}) error {
 	if chatid == "" {
 		return fmt.Errorf("wecom: chatid is empty")
 	}
@@ -616,10 +697,11 @@ func (p *Platform) sendActiveMessage(chatid, chattype string, body map[string]in
 		chatTypeInt = 2
 	}
 
+	reqID := generateReqID()
 	payload := map[string]interface{}{
 		"cmd": "aibot_send_msg",
 		"headers": map[string]string{
-			"req_id": generateReqID(),
+			"req_id": reqID,
 		},
 		"body": map[string]interface{}{
 			"chatid":    chatid,
@@ -629,5 +711,12 @@ func (p *Platform) sendActiveMessage(chatid, chattype string, body map[string]in
 	for k, v := range body {
 		payload["body"].(map[string]interface{})[k] = v
 	}
-	return p.wsClient.send(payload)
+	return p.wsClient.writeAndWaitAck(ctx, payload, reqID)
+}
+
+func truncateStr(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
 }

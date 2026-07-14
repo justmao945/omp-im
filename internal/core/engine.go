@@ -303,9 +303,30 @@ func buildNonStreamingFooter(p Platform, session AgentSession, turnStart time.Ti
 }
 
 func (e *Engine) processNormalMessage(ctx context.Context, cancel context.CancelFunc, p Platform, msg *Message, ent *sessionEntry) {
+	streamer, streaming := streamReplyer(p)
+
+	// Send an initial empty stream frame so the WeCom client creates a message
+	// bubble with the "typing" animation before any content arrives. This must
+	// happen before session setup so the user sees immediate feedback.
+	if streaming {
+		if err := streamer.StreamReply(ctx, msg.ReplyCtx, "", false); err != nil {
+			slog.Error("failed to send initial stream frame", "session", msg.SessionKey, "error", err)
+		}
+		// Now send the processing event which sets the status line.
+		if err := streamer.StreamEvent(ctx, msg.ReplyCtx, StreamEvent{Type: "processing"}); err != nil {
+			slog.Error("failed to send initial stream event", "session", msg.SessionKey, "error", err)
+		}
+	}
+
 	if err := e.ensureSessionForEntry(ctx, ent, msg.SessionKey); err != nil {
 		slog.Error("failed to start session", "session", msg.SessionKey, "error", err)
-		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Failed to start session: %v", err))
+		if streaming {
+			finishCtx, finishCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer finishCancel()
+			_ = streamer.StreamReply(finishCtx, msg.ReplyCtx, fmt.Sprintf("Failed to start session: %v", err), true)
+		} else {
+			_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Failed to start session: %v", err))
+		}
 		return
 	}
 
@@ -329,7 +350,6 @@ func (e *Engine) processNormalMessage(ctx context.Context, cancel context.Cancel
 	var err error
 	turnStart := time.Now()
 
-	streamer, streaming := streamReplyer(p)
 	if streaming {
 		onEvent := func(ev StreamEvent) {
 			switch ev.Type {
@@ -343,7 +363,6 @@ func (e *Engine) processNormalMessage(ctx context.Context, cancel context.Cancel
 				}
 			}
 		}
-		onEvent(StreamEvent{Type: "processing"})
 		reply, attachments, err = Session.Respond(ctx, msg.Content, msg.Images, msg.Files, onEvent)
 		if err == nil {
 			if err := streamer.StreamReply(ctx, msg.ReplyCtx, "", true); err != nil {
@@ -365,7 +384,9 @@ func (e *Engine) processNormalMessage(ctx context.Context, cancel context.Cancel
 			// stream (partial text was already shown incrementally) and
 			// return silently — the user already saw the /esc reply.
 			if streaming {
-				if ferr := streamer.StreamReply(ctx, msg.ReplyCtx, "", true); ferr != nil {
+				finishCtx, finishCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer finishCancel()
+				if ferr := streamer.StreamReply(finishCtx, msg.ReplyCtx, "", true); ferr != nil {
 					slog.Error("failed to finish stream reply on cancel", "session", msg.SessionKey, "error", ferr)
 				}
 			}
@@ -373,11 +394,23 @@ func (e *Engine) processNormalMessage(ctx context.Context, cancel context.Cancel
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			slog.Error("agent turn timed out", "session", msg.SessionKey, "error", err)
-			_ = p.Reply(ctx, msg.ReplyCtx, "Processing timed out. Please retry or send /esc to cancel.")
+			if streaming {
+				finishCtx, finishCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer finishCancel()
+				_ = streamer.StreamReply(finishCtx, msg.ReplyCtx, "Processing timed out. Please retry or send /esc to cancel.", true)
+			} else {
+				_ = p.Reply(ctx, msg.ReplyCtx, "Processing timed out. Please retry or send /esc to cancel.")
+			}
 			return
 		}
 		slog.Error("agent turn error", "session", msg.SessionKey, "error", err)
-		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Processing failed: %v", err))
+		if streaming {
+			finishCtx, finishCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer finishCancel()
+			_ = streamer.StreamReply(finishCtx, msg.ReplyCtx, fmt.Sprintf("Processing failed: %v", err), true)
+		} else {
+			_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Processing failed: %v", err))
+		}
 		return
 	}
 

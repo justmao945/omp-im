@@ -386,14 +386,9 @@ func (s *Session) Respond(ctx context.Context, prompt string, images []core.Imag
 				emit(core.StreamEvent{Type: "usage", Status: s.Status()})
 			}
 			if hasToolCall(params) {
-				cmd := toolCallCommand(params)
-				if cmd == "" {
-					cmd = toolCallPath(params)
-				}
-				if cmd == "" {
-					cmd = toolCallKind(params)
-				}
-				slog.Info("acp: tool call started", "session", s.sessionKey, "kind", toolCallKind(params), "path", toolCallPath(params), "command", truncate(cmd, 200))
+				cmd := composeToolDisplay(params)
+				kind := toolCallKind(params)
+				slog.Info("acp: tool call started", "session", s.sessionKey, "kind", kind, "title", toolCallTitle(params), "command", truncate(cmd, 200))
 				s.setToolStatus(true, cmd)
 				emit(core.StreamEvent{Type: "tool_start", Tool: cmd, ToolInput: extractToolRawInput(params), Status: s.Status()})
 			}
@@ -776,6 +771,16 @@ func collectToolCall(params json.RawMessage, calls map[string]*toolCall) {
 	}
 }
 
+func extractUpdateJSON(params json.RawMessage) json.RawMessage {
+	var wrap struct {
+		Update json.RawMessage `json:"update"`
+	}
+	if err := json.Unmarshal(params, &wrap); err != nil {
+		return nil
+	}
+	return wrap.Update
+}
+
 func hasToolCall(params json.RawMessage) bool {
 	var wrap struct {
 		Update json.RawMessage `json:"update"`
@@ -805,6 +810,50 @@ func toolCallKind(params json.RawMessage) string {
 	}
 	_ = json.Unmarshal(wrap.Update, &head)
 	return head.Kind
+}
+
+func toolCallTitle(params json.RawMessage) string {
+	var wrap struct {
+		Update json.RawMessage `json:"update"`
+	}
+	if err := json.Unmarshal(params, &wrap); err != nil {
+		return ""
+	}
+	var head struct {
+		Title string `json:"title"`
+	}
+	_ = json.Unmarshal(wrap.Update, &head)
+	return head.Title
+}
+
+// composeToolDisplay builds a human-readable tool display string by combining
+// the title, kind, and path/command fields from the ACP tool call update.
+func composeToolDisplay(params json.RawMessage) string {
+	title := toolCallTitle(params)
+	kind := toolCallKind(params)
+	path := toolCallPath(params)
+	cmd := toolCallCommand(params)
+
+	// target is the path or command, whichever is non-empty.
+	target := path
+	if target == "" {
+		target = cmd
+	}
+
+	switch {
+	case title != "" && target != "" && target != title:
+		return title + " · " + target
+	case title != "":
+		return title
+	case target != "" && kind != "" && kind != "other" && target != kind:
+		return kind + " · " + target
+	case target != "":
+		return target
+	case kind != "":
+		return kind
+	default:
+		return "tool"
+	}
 }
 
 func toolCallCommand(params json.RawMessage) string {

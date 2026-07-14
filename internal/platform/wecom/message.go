@@ -87,8 +87,9 @@ type replyContext struct {
 	contextUsed       int
 	contextSize       int
 
-	stopTicker func() // stops the per-second status-line ticker
-	finished   bool   // turn has ended; stop further renders
+	stopTicker       func() // stops the per-second status-line ticker
+	finished         bool   // turn has ended; stop further renders
+	sentInitialEmpty bool   // initial empty-content frame sent (triggers typing animation)
 }
 
 // wsFrame is the top-level envelope received over the WebSocket.

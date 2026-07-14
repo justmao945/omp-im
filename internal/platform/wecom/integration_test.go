@@ -66,11 +66,19 @@ func (m *mockWeComGateway) handle(w http.ResponseWriter, r *http.Request) {
 				"errcode": 0,
 				"errmsg":  "ok",
 			})
-		} else if cmd == "aibot_respond_msg" {
+	} else if cmd == "aibot_respond_msg" || cmd == "aibot_send_msg" {
 			m.mu.Lock()
 			m.replies = append(m.replies, frame)
 			m.mu.Unlock()
 			m.frameCh <- frame
+			// Send ack so writeAndWaitAck completes promptly.
+			headers, _ := frame["headers"].(map[string]interface{})
+			reqID, _ := headers["req_id"].(string)
+			_ = conn.WriteJSON(map[string]interface{}{
+				"headers": map[string]string{"req_id": reqID},
+				"errcode": 0,
+				"errmsg":  "ok",
+			})
 		} else if cmd == wsCmdPing {
 			_ = conn.WriteJSON(map[string]interface{}{
 				"headers": map[string]string{"req_id": "pong"},

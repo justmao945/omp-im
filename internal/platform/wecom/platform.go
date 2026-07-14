@@ -96,18 +96,17 @@ func (p *Platform) Reply(ctx context.Context, replyCtx any, content string) erro
 	if rc.chatid == "" {
 		return fmt.Errorf("wecom: missing chatid in reply context")
 	}
-	_ = ctx
 	if looksLikeMarkdown(content) && len(content) <= maxMarkdownContentBytes {
-		return p.sendMarkdownReply(rc, content)
+		return p.sendMarkdownReply(ctx, rc, content)
 	}
-	return p.sendTextReply(rc, content)
+	return p.sendTextReply(ctx, rc, content)
 }
 
 // maxMarkdownContentBytes is a conservative size limit for a single markdown message.
 const maxMarkdownContentBytes = 4096
 
 // sendMarkdownReply sends a passive markdown reply to the chat that triggered the inbound message.
-func (p *Platform) sendMarkdownReply(rc *replyContext, text string) error {
+func (p *Platform) sendMarkdownReply(ctx context.Context, rc *replyContext, text string) error {
 	if rc == nil || rc.chatid == "" {
 		return fmt.Errorf("wecom: chatid is empty")
 	}
@@ -121,9 +120,9 @@ func (p *Platform) sendMarkdownReply(rc *replyContext, text string) error {
 		},
 	}
 	if rc.reqID != "" {
-		return p.respond(rc.reqID, body)
+		return p.respond(ctx, rc.reqID, body)
 	}
-	return p.sendActiveMessage(rc.chatid, rc.chattype, body)
+	return p.sendActiveMessage(ctx, rc.chatid, rc.chattype, body)
 }
 
 // looksLikeMarkdown returns true if the text contains common markdown syntax.
@@ -168,28 +167,34 @@ func (p *Platform) handleFrame(frame *wsFrame) {
 		slog.Info("wecom: received group message", "message_id", msg.msgid, "chatid", msg.chatid, "from", msg.from, "msgtype", msg.msgtype)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-	images := p.collectInboundImages(ctx, msg)
-	slog.Debug("wecom: collected inbound images", "msgtype", msg.msgtype, "expected", len(msg.images), "collected", len(images))
+	// Run message processing in a goroutine so the WebSocket read loop is
+	// never blocked. This is critical now that reply frames wait for a
+	// server ack: if the handler ran inline, writeAndWaitAck would deadlock
+	// waiting for an ack that only the read loop can deliver.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		images := p.collectInboundImages(ctx, msg)
+		slog.Debug("wecom: collected inbound images", "msgtype", msg.msgtype, "expected", len(msg.images), "collected", len(images))
 
-	sessionKey := fmt.Sprintf("wecom:%s", msg.chatid)
-	files := p.collectInboundFiles(context.Background(), msg)
-	coreMsg := &core.Message{
-		SessionKey: sessionKey,
-		Platform:   p.Name(),
-		MessageID:  msg.msgid,
-		ChannelID:  msg.chatid,
-		UserID:     msg.from,
-		Content:    msg.text,
-		Images:     images,
-		Files:      files,
-		ReplyCtx:   &replyContext{chatid: msg.chatid, chattype: msg.chattype, reqID: msg.reqID, aibotid: msg.aibotid},
-	}
+		sessionKey := fmt.Sprintf("wecom:%s", msg.chatid)
+		files := p.collectInboundFiles(context.Background(), msg)
+		coreMsg := &core.Message{
+			SessionKey: sessionKey,
+			Platform:   p.Name(),
+			MessageID:  msg.msgid,
+			ChannelID:  msg.chatid,
+			UserID:     msg.from,
+			Content:    msg.text,
+			Images:     images,
+			Files:      files,
+			ReplyCtx:   &replyContext{chatid: msg.chatid, chattype: msg.chattype, reqID: msg.reqID, aibotid: msg.aibotid},
+		}
 
-	if p.handler != nil {
-		p.handler(p, coreMsg)
-	}
+		if p.handler != nil {
+			p.handler(p, coreMsg)
+		}
+	}()
 }
 
 // isAllowed checks dm and group allowlists.

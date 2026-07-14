@@ -12,10 +12,9 @@ type config struct {
 	websocketURL    string
 	allowFrom       string
 	groupAllowFrom  string
-	stream          bool
-	footer          bool
-	thinkingDisplay string // "concise", "detailed", or "off"
-	toolDisplay     string // "concise", "detailed", or "off"
+	stream         bool
+	footer         bool
+	display        string // "" = only "..." animation; "full" = show thinking + tools
 }
 
 func parseConfig(opts map[string]any) (*config, error) {
@@ -48,38 +47,23 @@ func parseConfig(opts map[string]any) (*config, error) {
 			return nil, fmt.Errorf("wecom: footer must be a boolean")
 		}
 	}
-	thinkingDisplay, _ := opts["thinking_display"].(string)
-	thinkingDisplay = strings.ToLower(strings.TrimSpace(thinkingDisplay))
-	if thinkingDisplay == "" {
-		thinkingDisplay = "concise"
-	}
-	switch thinkingDisplay {
-	case "concise", "detailed", "off":
+	display, _ := opts["display"].(string)
+	display = strings.ToLower(strings.TrimSpace(display))
+	switch display {
+	case "", "full":
 	default:
-		return nil, fmt.Errorf("wecom: thinking_display must be concise, detailed, or off")
-	}
-
-	toolDisplay, _ := opts["tool_display"].(string)
-	toolDisplay = strings.ToLower(strings.TrimSpace(toolDisplay))
-	if toolDisplay == "" {
-		toolDisplay = "concise"
-	}
-	switch toolDisplay {
-	case "concise", "detailed", "off":
-	default:
-		return nil, fmt.Errorf("wecom: tool_display must be concise, detailed, or off")
+		return nil, fmt.Errorf("wecom: display must be \"\" or \"full\"")
 	}
 
 	return &config{
-		botID:           strings.TrimSpace(botID),
-		secret:          strings.TrimSpace(secret),
-		websocketURL:    strings.TrimSpace(websocketURL),
-		allowFrom:       strings.TrimSpace(allowFrom),
-		groupAllowFrom:  strings.TrimSpace(groupAllowFrom),
-		stream:          stream,
-		footer:          footer,
-		thinkingDisplay: thinkingDisplay,
-		toolDisplay:     toolDisplay,
+		botID:          strings.TrimSpace(botID),
+		secret:         strings.TrimSpace(secret),
+		websocketURL:   strings.TrimSpace(websocketURL),
+		allowFrom:      strings.TrimSpace(allowFrom),
+		groupAllowFrom: strings.TrimSpace(groupAllowFrom),
+		stream:         stream,
+		footer:         footer,
+		display:        display,
 	}, nil
 }
 

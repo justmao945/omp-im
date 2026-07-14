@@ -281,11 +281,14 @@ func (c *wsClient) writeJSON(conn *websocket.Conn, v interface{}) error {
 func (c *wsClient) writeAndWaitAck(ctx context.Context, frame map[string]interface{}, reqID string) error {
 	result, err := c.writeAndWaitResult(ctx, frame, reqID, wsAckTimeout)
 	if errors.Is(err, errWSAckTimeout) {
-		slog.Debug("wecom: ack timeout, proceeding", "req_id", reqID)
+		slog.Warn("wecom: ack timeout, proceeding", "req_id", reqID)
 		return nil
 	}
 	if err != nil {
 		return err
+	}
+	if result.err != nil {
+		slog.Warn("wecom: ack returned error", "req_id", reqID, "errcode", result.frame.ErrCode, "errmsg", result.frame.ErrMsg)
 	}
 	return result.err
 }
@@ -308,7 +311,9 @@ func (c *wsClient) writeAndWaitFrameWithTimeout(ctx context.Context, frame map[s
 // writeAndWaitResult sends a frame and waits for the server to respond with the same req_id.
 func (c *wsClient) writeAndWaitResult(ctx context.Context, frame map[string]interface{}, reqID string, timeout time.Duration) (wsAckResult, error) {
 	if c.sendFn != nil {
-		return wsAckResult{}, fmt.Errorf("wecom: writeAndWait not supported with sendFn")
+		// Test mode: sendFn stubs the outbound send. No ack is expected;
+		// return immediately so tests using sendFn are not blocked.
+		return wsAckResult{}, c.sendFn(frame)
 	}
 
 	ch := make(chan wsAckResult, 1)

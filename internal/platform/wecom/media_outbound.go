@@ -188,10 +188,7 @@ func (p *Platform) sendWSMediaReply(ctx context.Context, rc *replyContext, media
 			"headers": map[string]string{"req_id": rc.reqID},
 			"body":    body,
 		}
-		if err := p.wsClient.send(frame); err != nil {
-			return err
-		}
-		return nil
+		return p.wsClient.writeAndWaitAck(ctx, frame, rc.reqID)
 	}
 	return p.sendWSMediaMessage(ctx, rc.chatid, mediaType, mediaID)
 }

@@ -2,6 +2,7 @@ package wecom
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"log/slog"
 	"strings"
@@ -323,7 +324,7 @@ func TestSendTextReply(t *testing.T) {
 	}
 
 	rc := &replyContext{chatid: "chat1", chattype: "group", reqID: "req-123"}
-	if err := p.sendTextReply(rc, "hello"); err != nil {
+	if err := p.sendTextReply(context.Background(), rc, "hello"); err != nil {
 		t.Fatal(err)
 	}
 	if sent["cmd"] != "aibot_respond_msg" {
@@ -354,7 +355,7 @@ func TestReplyWithEmptyContent(t *testing.T) {
 			},
 		},
 	}
-	if err := p.Reply(nil, &replyContext{chatid: "c1"}, ""); err != nil {
+	if err := p.Reply(context.Background(), &replyContext{chatid: "c1"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if sent {
