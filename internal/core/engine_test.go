@@ -924,6 +924,60 @@ func TestEngineProjCommand(t *testing.T) {
 	}
 }
 
+func TestEngineDisplayCommand(t *testing.T) {
+	eng := NewEngine(
+		map[string]Agent{"fake": &fakeAgent{name: "fake", reply: "hi"}},
+		"fake",
+		map[string]Project{"default": {Name: "default"}},
+		"default",
+	)
+	p := &fakePlatform{name: "fake"}
+	eng.AddPlatform(p)
+
+	go func() {
+		for p.getHandler() == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+		// Toggle on.
+		p.getHandler()(p, &Message{SessionKey: "fake:u1", Platform: "fake", UserID: "u1", Content: "/display", ReplyCtx: "ctx"})
+		// Toggle off.
+		p.getHandler()(p, &Message{SessionKey: "fake:u1", Platform: "fake", UserID: "u1", Content: "/display", ReplyCtx: "ctx"})
+		// Explicit set to full.
+		p.getHandler()(p, &Message{SessionKey: "fake:u1", Platform: "fake", UserID: "u1", Content: "/display full", ReplyCtx: "ctx"})
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		_ = eng.Run()
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	_ = eng.Stop()
+	<-done
+
+	if eng.DisplayMode() != "full" {
+		t.Fatalf("DisplayMode = %q, want full", eng.DisplayMode())
+	}
+
+	p.mu.Lock()
+	replies := append([]string(nil), p.replies...)
+	p.mu.Unlock()
+
+	if len(replies) != 3 {
+		t.Fatalf("got %d replies, want 3", len(replies))
+	}
+	if !strings.Contains(replies[0], "full") {
+		t.Fatalf("first toggle reply = %q, want full", replies[0])
+	}
+	if !strings.Contains(replies[1], "simplified") {
+		t.Fatalf("second toggle reply = %q, want simplified", replies[1])
+	}
+	if !strings.Contains(replies[2], "full") {
+		t.Fatalf("explicit full reply = %q, want full", replies[2])
+	}
+}
+
 func TestEnginePCommandDuringActiveTurn(t *testing.T) {
 	a1 := &fakeAgent{name: "slow", reply: "slow-reply", respondDelay: 5 * time.Second}
 	eng := NewEngine(

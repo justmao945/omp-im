@@ -38,6 +38,7 @@
 | `default.project` | `string` | Default project for new conversations. |
 | `platforms` | `[]PlatformConfig` | IM platforms: `weixin`, `wecom`, or the test-only `http` platform. |
 | `session_store` | `string` | Optional bbolt path for persisted agent session IDs. Defaults to `~/.omp-im/sessions.db`. |
+| `display` | `string` | Stream rendering: `""` (default, body text only) or `full` (show thinking + tool activity inline). Toggle at runtime with `/display`. |
 
 ### ProjectConfig
 
@@ -83,8 +84,6 @@
 | `group_allow_from` | `string` | Comma-separated list of allowed group chat IDs. `"*"` or empty allows all groups. |
 | `stream` | `bool` | Send incremental replies. Defaults to `true`; set to `false` to send only the completed reply. |
 | `footer` | `bool` | Append a turn-summary footer (⏱️ elapsed · 🧠 context%). Defaults to `true`. |
-| `thinking_display` | `string` | How agent thinking is shown: `concise` (default), `detailed`, or `off`. |
-| `tool_display` | `string` | How agent tool activity is shown: `concise` (default), `detailed`, or `off`. |
 
 Sessions are isolated by chat: each group chat uses its own `session_key` (`wecom:<chatid>`), and each direct message user also gets a separate session.
 

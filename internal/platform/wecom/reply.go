@@ -281,7 +281,7 @@ func (p *Platform) renderStream(ctx context.Context, rc *replyContext, finished 
 		rc.stopTicker = nil
 	}
 
-	content := buildStreamContent(rc, p.cfg.display, finished, p.cfg.footer)
+	content := buildStreamContent(rc, p.currentDisplay(), finished, p.cfg.footer)
 
 	// If content fits in one frame, send it directly.
 	if len(content) <= maxStreamContentBytes {

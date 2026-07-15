@@ -115,6 +115,54 @@ func TestProjectLookup(t *testing.T) {
 	}
 }
 
+func TestValidateDisplayMode(t *testing.T) {
+	base := func() *Config {
+		return &Config{
+			Agents:    []string{"omp"},
+			Projects:  []ProjectConfig{{Name: "p1"}},
+			Defaults:  DefaultsConfig{Agent: "omp", Project: "p1"},
+			Platforms: []PlatformConfig{{Type: "weixin"}},
+		}
+	}
+	t.Run("empty is valid", func(t *testing.T) {
+		cfg := base()
+		cfg.Display = ""
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("Validate(): %v", err)
+		}
+		if cfg.Display != "" {
+			t.Fatalf("Display = %q, want empty", cfg.Display)
+		}
+	})
+	t.Run("full is valid", func(t *testing.T) {
+		cfg := base()
+		cfg.Display = "full"
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("Validate(): %v", err)
+		}
+		if cfg.Display != "full" {
+			t.Fatalf("Display = %q, want full", cfg.Display)
+		}
+	})
+	t.Run("invalid rejected", func(t *testing.T) {
+		cfg := base()
+		cfg.Display = "verbose"
+		if err := cfg.Validate(); err == nil {
+			t.Fatal("expected error for invalid display mode")
+		}
+	})
+	t.Run("normalized to lowercase", func(t *testing.T) {
+		cfg := base()
+		cfg.Display = "FULL"
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("Validate(): %v", err)
+		}
+		if cfg.Display != "full" {
+			t.Fatalf("Display = %q, want full", cfg.Display)
+		}
+	})
+}
+
 func TestPlatformConfigWeixinAccount(t *testing.T) {
 	cases := []struct {
 		name string

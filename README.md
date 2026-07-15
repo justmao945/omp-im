@@ -50,7 +50,7 @@ The QR-code session is retained under `~/.omp-im/weixin/`. Set `token` instead w
 
 Configure a `wecom` platform with `bot_id` and `secret`. It connects to the AI bot WebSocket gateway, supports direct and group chats, and accepts text, images, files, voice, mixed messages, and quoted messages. Replies stream by default; set `stream` to `false` to send only a completed reply. A turn-summary footer (⏱️ elapsed · 🧠 context%) is appended by default; set `footer` to `false` to disable it. Quote content is appended to the agent prompt under `[quoted message]`.
 
-Use `allow_from` for direct-message user IDs and `group_allow_from` for group chat IDs. Both default to allowing everyone; configure explicit IDs in production. `thinking_display` and `tool_display` accept `concise` (default), `detailed`, or `off`.
+Use `allow_from` for direct-message user IDs and `group_allow_from` for group chat IDs. Both default to allowing everyone; configure explicit IDs in production. Set the top-level `display` option to `"full"` to show agent thinking and tool activity inline during streaming (default is body-text-only); toggle it at runtime with the `/display` command.
 
 ### Local HTTP testing
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // SupportedAgentNames lists agent names that have built-in implementations.
@@ -20,6 +21,9 @@ type Config struct {
 	// SessionStore is the path to a bbolt database that persists agent session IDs
 	// across restarts. If empty, it defaults to <user home>/.omp-im/sessions.db.
 	SessionStore string `json:"session_store,omitempty"`
+	// Display controls stream rendering: "" (default) shows only body text,
+	// "full" shows thinking and tool activity inline. Toggle at runtime via /display.
+	Display string `json:"display,omitempty"`
 }
 
 // ProjectConfig configures a project with its own working directory.
@@ -157,6 +161,11 @@ func (c *Config) Validate() error {
 			weixinAccounts[account] = i
 		}
 	}
+	display := strings.ToLower(strings.TrimSpace(c.Display))
+	if display != "" && display != "full" {
+		return fmt.Errorf("display must be \"\" or \"full\"")
+	}
+	c.Display = display
 	return nil
 }
 

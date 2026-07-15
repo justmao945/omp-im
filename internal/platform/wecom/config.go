@@ -14,7 +14,6 @@ type config struct {
 	groupAllowFrom  string
 	stream         bool
 	footer         bool
-	display        string // "" = only "..." animation; "full" = show thinking + tools
 }
 
 func parseConfig(opts map[string]any) (*config, error) {
@@ -47,14 +46,6 @@ func parseConfig(opts map[string]any) (*config, error) {
 			return nil, fmt.Errorf("wecom: footer must be a boolean")
 		}
 	}
-	display, _ := opts["display"].(string)
-	display = strings.ToLower(strings.TrimSpace(display))
-	switch display {
-	case "", "full":
-	default:
-		return nil, fmt.Errorf("wecom: display must be \"\" or \"full\"")
-	}
-
 	return &config{
 		botID:          strings.TrimSpace(botID),
 		secret:         strings.TrimSpace(secret),
@@ -63,7 +54,6 @@ func parseConfig(opts map[string]any) (*config, error) {
 		groupAllowFrom: strings.TrimSpace(groupAllowFrom),
 		stream:         stream,
 		footer:         footer,
-		display:        display,
 	}, nil
 }
 

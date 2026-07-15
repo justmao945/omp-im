@@ -18,6 +18,7 @@ type Platform struct {
 	wsClient   *wsClient
 	handler    core.MessageHandler
 	httpClient *http.Client
+	display    core.DisplayProvider
 
 	startOnce sync.Once
 	stopOnce  sync.Once
@@ -47,6 +48,21 @@ func (p *Platform) StreamingEnabled() bool { return p.cfg.stream }
 
 // FooterEnabled reports whether the turn-summary footer should be appended.
 func (p *Platform) FooterEnabled() bool { return p.cfg.footer }
+
+// SetDisplayProvider injects the engine as the source of the runtime-toggleable
+// display mode. The engine calls this at AddPlatform.
+func (p *Platform) SetDisplayProvider(d core.DisplayProvider) {
+	p.display = d
+}
+
+// currentDisplay returns the active display mode: the engine's runtime value
+// when available, otherwise simplified ("").
+func (p *Platform) currentDisplay() string {
+	if p.display != nil {
+		return p.display.DisplayMode()
+	}
+	return ""
+}
 
 // Name returns the platform name.
 func (p *Platform) Name() string { return "wecom" }

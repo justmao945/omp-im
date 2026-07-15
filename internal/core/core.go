@@ -42,6 +42,19 @@ type FooterEnabled interface {
 	FooterEnabled() bool
 }
 
+// DisplayProvider returns the current stream display mode: "" (simplified,
+// body text only) or "full" (thinking + tool activity inline). The engine
+// implements this so platforms can render based on a runtime-toggleable value.
+type DisplayProvider interface {
+	DisplayMode() string
+}
+
+// DisplaySetter is implemented by platforms that render streams based on a
+// shared display mode. The engine injects itself as the provider at AddPlatform.
+type DisplaySetter interface {
+	SetDisplayProvider(DisplayProvider)
+}
+
 // Platform abstracts a messaging platform (Weixin, WeCom, etc.).
 type Platform interface {
 	Name() string

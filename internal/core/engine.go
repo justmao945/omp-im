@@ -36,6 +36,9 @@ type Engine struct {
 
 	activeTurns   map[string]context.CancelFunc
 	activeTurnsMu sync.Mutex
+
+	displayMode string
+	displayMu   sync.RWMutex
 }
 
 type queuedMessage struct {
@@ -137,9 +140,29 @@ func (e *Engine) deleteSessionID(sessionKey string) {
 	}
 }
 
-// AddPlatform registers a platform. Platforms must be added before Run.
 func (e *Engine) AddPlatform(p Platform) {
 	e.platforms = append(e.platforms, p)
+	if s, ok := p.(DisplaySetter); ok {
+		s.SetDisplayProvider(e)
+	}
+}
+
+// DisplayMode returns the current stream display mode ("" or "full").
+func (e *Engine) DisplayMode() string {
+	e.displayMu.RLock()
+	defer e.displayMu.RUnlock()
+	return e.displayMode
+}
+
+// SetDisplayMode sets the stream display mode. Only "" and "full" are valid.
+func (e *Engine) SetDisplayMode(mode string) {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode != "" && mode != "full" {
+		return
+	}
+	e.displayMu.Lock()
+	e.displayMode = mode
+	e.displayMu.Unlock()
 }
 
 // Run starts all platforms and blocks until Stop is called.
@@ -544,6 +567,8 @@ func (e *Engine) handleCommand(ctx context.Context, p Platform, msg *Message, cm
 	switch cmd.name {
 	case "agent":
 		e.handleAgentCommand(ctx, p, msg, cmd.arg)
+	case "display":
+		e.handleDisplayCommand(ctx, p, msg, cmd.arg)
 	case "proj":
 		e.handleProjCommand(ctx, p, msg, cmd.arg)
 	case "help", "?":
@@ -614,7 +639,35 @@ func (e *Engine) handleHelpCommand(ctx context.Context, p Platform, msg *Message
 		"- `/ls` — list the current agent's own historical sessions for this project\n"+
 		"- `/sw <n or id>` — switch to one of the listed sessions (resumes it next message)\n"+
 		"- `//<cmd>` — pass a slash command through to the agent (e.g. `//web query`)\n"+
+		"- `/display` — toggle stream display between **full** (thinking + tools) and simplified (body only)\n"+
 		"- `/help`, `/?` — show this help")
+}
+
+func (e *Engine) handleDisplayCommand(ctx context.Context, p Platform, msg *Message, arg string) {
+	arg = strings.ToLower(strings.TrimSpace(arg))
+	var mode string
+	switch arg {
+	case "":
+		// Toggle between full and simplified.
+		if e.DisplayMode() == "full" {
+			mode = ""
+		} else {
+			mode = "full"
+		}
+	case "full":
+		mode = "full"
+	case "off", "simple", "concise":
+		mode = ""
+	default:
+		_ = p.Reply(ctx, msg.ReplyCtx, "Usage: `/display` toggles between full and simplified.\n`/display full` or `/display off` sets it explicitly.")
+		return
+	}
+	e.SetDisplayMode(mode)
+	label := "simplified (body only)"
+	if mode == "full" {
+		label = "full (thinking + tools)"
+	}
+	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Display mode: **%s**", label))
 }
 
 func (e *Engine) handleEscCommand(ctx context.Context, p Platform, msg *Message) {
