@@ -629,17 +629,21 @@ func (e *Engine) handleProjCommand(ctx context.Context, p Platform, msg *Message
 
 func (e *Engine) handleHelpCommand(ctx context.Context, p Platform, msg *Message) {
 	_ = p.Reply(ctx, msg.ReplyCtx, "## Available Commands\n\n"+
+		"**Agent & Project**\n"+
 		"- `/agent` — show the current agent and available agents\n"+
 		"- `/agent <name>` — switch to the named agent\n"+
 		"- `/proj` — show the current project and available projects\n"+
 		"- `/proj <name>` — switch to the named project\n"+
-		"- `/esc` — cancel the currently generating reply\n"+
-		"- `/p` — show current agent, project, model, and context usage\n"+
+		"\n**Session**\n"+
 		"- `/new` — start a new session (closes the current one, next message starts fresh)\n"+
 		"- `/ls` — list the current agent's own historical sessions for this project\n"+
 		"- `/sw <n or id>` — switch to one of the listed sessions (resumes it next message)\n"+
-		"- `//<cmd>` — pass a slash command through to the agent (e.g. `//web query`)\n"+
+		"\n**Status & Control**\n"+
+		"- `/p` — show current agent, project, model, and context usage\n"+
+		"- `/esc` — cancel the currently generating reply\n"+
 		"- `/display` — toggle stream display between **full** (thinking + tools) and simplified (body only)\n"+
+		"\n**Other**\n"+
+		"- `//<cmd>` — pass a slash command through to the agent (e.g. `//web query`)\n"+
 		"- `/help`, `/?` — show this help")
 }
 
