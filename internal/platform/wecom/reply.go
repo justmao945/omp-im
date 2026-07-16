@@ -283,6 +283,15 @@ func (p *Platform) renderStream(ctx context.Context, rc *replyContext, finished 
 
 	content := buildStreamContent(rc, p.currentDisplay(), finished, p.currentFooter())
 
+	// Skip non-final frames whose content hasn't changed since the last render.
+	// This prevents the per-second status-line ticker from spamming identical
+	// frames during long thinking or tool-call phases where no body text has
+	// arrived yet and no time-based status line is present.
+	if !finished && content == rc.lastContent {
+		return nil
+	}
+	rc.lastContent = content
+
 	// If content fits in one frame, send it directly.
 	if len(content) <= maxStreamContentBytes {
 		return p.sendStreamFrame(ctx, rc, rc.streamID, content, finished)

@@ -24,6 +24,7 @@ type Config struct {
 	Args             []string
 	WorkDir          string
 	AutoApproveTools bool
+	MCPServers       []any
 	// AuthMethod is sent to authenticate during initialization. Empty leaves
 	// authentication to the spawned agent's own CLI credentials.
 	AuthMethod string
@@ -238,7 +239,7 @@ func (s *Session) handshake(ctx context.Context) error {
 
 	newRes, err := s.tr.call(ctx, "session/new", map[string]any{
 		"cwd":        s.cfg.WorkDir,
-		"mcpServers": []any{},
+		"mcpServers": s.cfg.MCPServers,
 	})
 	if err != nil {
 		return fmt.Errorf("acp session/new: %w", err)
@@ -263,7 +264,7 @@ func (s *Session) callSessionResume(ctx context.Context) error {
 	res, err := s.tr.call(ctx, "session/resume", map[string]any{
 		"sessionId":  s.resumeSessionID,
 		"cwd":        s.cfg.WorkDir,
-		"mcpServers": []any{},
+		"mcpServers": s.cfg.MCPServers,
 	})
 	if err != nil {
 		return err
@@ -288,7 +289,7 @@ func (s *Session) callSessionLoad(ctx context.Context) error {
 	res, err := s.tr.call(ctx, "session/load", map[string]any{
 		"sessionId":  s.resumeSessionID,
 		"cwd":        s.cfg.WorkDir,
-		"mcpServers": []any{},
+		"mcpServers": s.cfg.MCPServers,
 	})
 	if err != nil {
 		return err
@@ -403,11 +404,17 @@ func (s *Session) Respond(ctx context.Context, prompt string, images []core.Imag
 				attachments = append(attachments, *at)
 				mu.Unlock()
 			}
-		case "request_permission":
+		case "session/request_permission", "request_permission":
+			optionID := "reject_once"
 			if s.cfg.AutoApproveTools {
-				return map[string]any{"optionId": "allow"}, nil
+				optionID = "allow_once"
 			}
-			return map[string]any{"optionId": "deny"}, nil
+			return map[string]any{
+				"outcome": map[string]any{
+					"outcome":  "selected",
+					"optionId": optionID,
+				},
+			}, nil
 		}
 		return nil, nil
 	}
@@ -422,6 +429,15 @@ func (s *Session) Respond(ctx context.Context, prompt string, images []core.Imag
 	go func() {
 		res, err := s.tr.call(ctx, "session/prompt", params)
 		if err != nil {
+			// Context was cancelled or timed out. Notify the agent to abort
+			// the current turn so it can process future prompts. Without this,
+			// the agent stays stuck on the in-flight LLM request and every
+			// subsequent turn blocks until its own timeout.
+			if ctx.Err() != nil && s.sessionID != "" {
+				_ = s.tr.notify("session/cancel", map[string]any{
+					"sessionId": s.sessionID,
+				})
+			}
 			slog.Error("acp session/prompt failed", "error", err)
 			resultCh <- promptResult{StopReason: "error"}
 			return

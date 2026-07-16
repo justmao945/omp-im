@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -35,6 +36,57 @@ type rpcMessage struct {
 	Params  json.RawMessage `json:"params,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
 	Error   *rpcError       `json:"error,omitempty"`
+	hasID   bool
+}
+
+// ACP emits server requests with id: 0. Keep field presence separate from the
+// numeric value so id: 0 is neither dropped nor mistaken for a notification.
+func (m rpcMessage) MarshalJSON() ([]byte, error) {
+	type wireMessage struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      *int            `json:"id,omitempty"`
+		Method  string          `json:"method,omitempty"`
+		Params  json.RawMessage `json:"params,omitempty"`
+		Result  json.RawMessage `json:"result,omitempty"`
+		Error   *rpcError       `json:"error,omitempty"`
+	}
+	var id *int
+	if m.hasID || m.ID != 0 {
+		id = &m.ID
+	}
+	return json.Marshal(wireMessage{
+		JSONRPC: m.JSONRPC,
+		ID:      id,
+		Method:  m.Method,
+		Params:  m.Params,
+		Result:  m.Result,
+		Error:   m.Error,
+	})
+}
+
+func (m *rpcMessage) UnmarshalJSON(data []byte) error {
+	type wireMessage struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      *int            `json:"id"`
+		Method  string          `json:"method"`
+		Params  json.RawMessage `json:"params"`
+		Result  json.RawMessage `json:"result"`
+		Error   *rpcError       `json:"error"`
+	}
+	var wire wireMessage
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	m.JSONRPC = wire.JSONRPC
+	m.Method = wire.Method
+	m.Params = wire.Params
+	m.Result = wire.Result
+	m.Error = wire.Error
+	m.hasID = wire.ID != nil
+	if wire.ID != nil {
+		m.ID = *wire.ID
+	}
+	return nil
 }
 
 type rpcError struct {
@@ -145,6 +197,8 @@ func (t *Transport) write(msg rpcMessage) error {
 	}
 	data = append(data, '\n')
 
+	slog.Debug("acp: outbound RPC", "id", msg.ID, "method", msg.Method, "params", redactRPCPayload(msg.Params), "result", redactRPCPayload(msg.Result), "error", msg.Error)
+
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	_, err = t.stdin.Write(data)
@@ -164,8 +218,31 @@ func (t *Transport) readLoop() {
 			slog.Debug("acp: skip non-json line", "line", string(line))
 			continue
 		}
-		if msg.ID != 0 {
-			// Response to a client request
+		slog.Debug("acp: inbound RPC", "id", msg.ID, "method", msg.Method, "params", redactRPCPayload(msg.Params), "result", redactRPCPayload(msg.Result), "error", msg.Error)
+		if msg.Method != "" {
+			// Server-to-client request or notification (has Method field).
+			// Must be checked before the ID branch below, because server
+			// requests carry both a Method and an ID; if we fell into the
+			// ID branch first we would silently discard them, and the
+			// pending-channel lookup would fail (the server sent this ID,
+			// not us), so the permission response would never be written.
+			if t.serverReqHandler != nil {
+				slog.Debug("acp: server request", "method", msg.Method)
+				result, err := t.serverReqHandler(msg.Method, msg.Params)
+				if msg.hasID {
+					resp := rpcMessage{JSONRPC: "2.0", ID: msg.ID, hasID: true}
+					if err != nil {
+						resp.Error = &rpcError{Code: -32603, Message: err.Error()}
+					} else {
+						resp.Result = mustMarshal(result)
+					}
+					_ = t.write(resp)
+				}
+			}
+			continue
+		}
+		if msg.hasID {
+			// Response to a client request (has ID but no Method).
 			t.mu.Lock()
 			ch, ok := t.pending[msg.ID]
 			delete(t.pending, msg.ID)
@@ -176,22 +253,6 @@ func (t *Transport) readLoop() {
 					err = msg.Error
 				}
 				ch <- rpcResponse{Result: msg.Result, Error: err}
-			}
-			continue
-		}
-		if msg.Method != "" && t.serverReqHandler != nil {
-			// Server-to-client request/notification. Handle sequentially to keep
-			// session/update notifications (and therefore textParts) in order.
-			slog.Debug("acp: server request", "method", msg.Method)
-			result, err := t.serverReqHandler(msg.Method, msg.Params)
-			if msg.ID != 0 {
-				resp := rpcMessage{JSONRPC: "2.0", ID: msg.ID}
-				if err != nil {
-					resp.Error = &rpcError{Code: -32603, Message: err.Error()}
-				} else {
-					resp.Result = mustMarshal(result)
-				}
-				_ = t.write(resp)
 			}
 			continue
 		}
@@ -247,4 +308,48 @@ func (t *Transport) Close() error {
 func mustMarshal(v any) json.RawMessage {
 	b, _ := json.Marshal(v)
 	return b
+}
+
+func redactRPCPayload(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return string(raw)
+	}
+	return redactRPCValue(value)
+}
+
+func redactRPCValue(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		redacted := make(map[string]any, len(value))
+		for key, child := range value {
+			if isSensitiveRPCKey(key) {
+				redacted[key] = "[REDACTED]"
+				continue
+			}
+			redacted[key] = redactRPCValue(child)
+		}
+		return redacted
+	case []any:
+		redacted := make([]any, len(value))
+		for i, child := range value {
+			redacted[i] = redactRPCValue(child)
+		}
+		return redacted
+	default:
+		return value
+	}
+}
+
+func isSensitiveRPCKey(key string) bool {
+	key = strings.ToLower(key)
+	return strings.Contains(key, "token") ||
+		strings.Contains(key, "apikey") ||
+		strings.Contains(key, "authorization") ||
+		strings.Contains(key, "secret") ||
+		strings.Contains(key, "cookie") ||
+		strings.Contains(key, "password")
 }

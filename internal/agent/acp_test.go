@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"os/exec"
 	"strings"
 	"testing"
@@ -179,5 +180,92 @@ func TestExtractAgentThought(t *testing.T) {
 	}
 	if got := extractAgentText(params); got != "" {
 		t.Fatalf("extractAgentText should not return thought text, got %q", got)
+	}
+}
+
+func TestParseMCPServersForACP(t *testing.T) {
+	servers, err := parseMCPServers([]byte(`{
+		"mcpServers": {
+			"shell": {
+				"command": "/usr/local/bin/mcp-shell",
+				"args": ["serve"],
+				"env": {"TOKEN": "secret"}
+			},
+			"wecom": {
+				"type": "http",
+				"url": "https://example.test/mcp",
+				"headers": {"Authorization": "Bearer token"}
+			},
+			"disabled": {"type": "http", "url": "https://disabled.test", "enabled": false}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("parse MCP servers: %v", err)
+	}
+	if len(servers) != 2 {
+		t.Fatalf("server count = %d, want 2", len(servers))
+	}
+
+	byName := make(map[string]map[string]any, len(servers))
+	for _, server := range servers {
+		value, ok := server.(map[string]any)
+		if !ok {
+			t.Fatalf("server type = %T, want map[string]any", server)
+		}
+		byName[value["name"].(string)] = value
+	}
+	if got := byName["shell"]["command"]; got != "/usr/local/bin/mcp-shell" {
+		t.Fatalf("stdio command = %v", got)
+	}
+	if got := byName["wecom"]["url"]; got != "https://example.test/mcp" {
+		t.Fatalf("HTTP URL = %v", got)
+	}
+	if _, ok := byName["disabled"]; ok {
+		t.Fatal("disabled MCP server was included")
+	}
+}
+
+func TestResolveMCPPath(t *testing.T) {
+	if got := resolveMCPPath("/opt/server", "./mcp/server.mjs"); got != "/opt/server/mcp/server.mjs" {
+		t.Fatalf("relative MCP path = %q", got)
+	}
+	if got := resolveMCPPath("/opt/server", "node"); got != "node" {
+		t.Fatalf("PATH command = %q", got)
+	}
+	if got := resolveMCPPath("/opt/server", "/usr/local/bin/server"); got != "/usr/local/bin/server" {
+		t.Fatalf("absolute MCP path = %q", got)
+	}
+}
+
+func TestRedactRPCPayload(t *testing.T) {
+	got := redactRPCPayload([]byte(`{"command":"printf ok","apiKey":"hidden","nested":{"cookie":"hidden","visible":"yes"}}`))
+	value := got.(map[string]any)
+	if value["command"] != "printf ok" {
+		t.Fatalf("command was changed: %v", value["command"])
+	}
+	if value["apiKey"] != "[REDACTED]" {
+		t.Fatalf("API key was not redacted: %v", value["apiKey"])
+	}
+	nested := value["nested"].(map[string]any)
+	if nested["cookie"] != "[REDACTED]" || nested["visible"] != "yes" {
+		t.Fatalf("nested redaction = %#v", nested)
+	}
+}
+
+func TestRPCMessagePreservesZeroID(t *testing.T) {
+	var received rpcMessage
+	if err := json.Unmarshal([]byte(`{"jsonrpc":"2.0","id":0,"method":"session/request_permission","params":{}}`), &received); err != nil {
+		t.Fatalf("unmarshal RPC message: %v", err)
+	}
+	if !received.hasID || received.ID != 0 {
+		t.Fatalf("received ID = %d, present = %t; want present zero ID", received.ID, received.hasID)
+	}
+
+	response, err := json.Marshal(rpcMessage{JSONRPC: "2.0", ID: received.ID, hasID: true, Result: mustMarshal(map[string]any{})})
+	if err != nil {
+		t.Fatalf("marshal RPC response: %v", err)
+	}
+	if string(response) != `{"jsonrpc":"2.0","id":0,"result":{}}` {
+		t.Fatalf("response = %s, want id:0 preserved", response)
 	}
 }

@@ -40,11 +40,16 @@ func (a *localACPAgent) Name() string { return a.cfg.name }
 func (a *localACPAgent) Stop() error { return nil }
 
 func (a *localACPAgent) StartSession(ctx context.Context, sessionKey string, project core.Project, resumeSessionID string) (core.AgentSession, error) {
+	mcpServers, err := loadMCPServers(a.cfg.name, project.WorkDir)
+	if err != nil {
+		return nil, err
+	}
 	cfg := Config{
 		Command:          a.cfg.command,
 		Args:             a.cfg.args,
 		WorkDir:          project.WorkDir,
 		AutoApproveTools: a.cfg.autoApproveTools,
+		MCPServers:       mcpServers,
 		AuthMethod:       a.cfg.authMethod,
 		InstallHint:      a.cfg.installHint,
 	}

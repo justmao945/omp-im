@@ -84,6 +84,7 @@ type replyContext struct {
 	turnStart         time.Time
 	turnEnd           time.Time
 	lastRender        time.Time
+	lastContent       string // last sent stream content; used to skip identical non-final re-renders
 	contextUsed       int
 	contextSize       int
 
