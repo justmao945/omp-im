@@ -1,8 +1,12 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os/exec"
 	"strings"
 	"testing"
@@ -267,5 +271,76 @@ func TestRPCMessagePreservesZeroID(t *testing.T) {
 	}
 	if string(response) != `{"jsonrpc":"2.0","id":0,"result":{}}` {
 		t.Fatalf("response = %s, want id:0 preserved", response)
+	}
+}
+
+func TestMCPWarmProxyCachesDiscoveryAndForwardsCalls(t *testing.T) {
+	calls := make(map[string]int)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var request struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode upstream request: %v", err)
+		}
+		calls[request.Method]++
+		result := map[string]any{}
+		switch request.Method {
+		case "initialize":
+			result = map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{}}
+		case "tools/list":
+			result = map[string]any{"tools": []any{map[string]any{"name": "ping", "description": "ping", "inputSchema": map[string]any{"type": "object"}}}}
+		case "tools/call":
+			result = map[string]any{"content": []any{map[string]any{"type": "text", "text": "pong"}}}
+		default:
+			t.Fatalf("unexpected upstream method %q", request.Method)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+	}))
+	defer upstream.Close()
+
+	proxy := newMCPWarmProxy()
+	defer proxy.Close()
+	servers, err := proxy.warmHTTPServers(context.Background(), []any{map[string]any{
+		"name": "test",
+		"type": "http",
+		"url":  upstream.URL,
+	}})
+	if err != nil {
+		t.Fatalf("warm HTTP MCP: %v", err)
+	}
+	proxyURL := servers[0].(map[string]any)["url"].(string)
+
+	post := func(method string) map[string]any {
+		body := []byte(`{"jsonrpc":"2.0","id":9,"method":"` + method + `","params":{}}`)
+		response, err := http.Post(proxyURL, "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("post %s: %v", method, err)
+		}
+		defer response.Body.Close()
+		payload, err := io.ReadAll(response.Body)
+		if err != nil {
+			t.Fatalf("read %s response: %v", method, err)
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(payload, &decoded); err != nil {
+			t.Fatalf("decode %s response: %v", method, err)
+		}
+		return decoded
+	}
+	if got := post("initialize")["id"]; got != float64(9) {
+		t.Fatalf("cached initialize response ID = %v", got)
+	}
+	if got := post("tools/list")["id"]; got != float64(9) {
+		t.Fatalf("cached tools/list response ID = %v", got)
+	}
+	if calls["initialize"] != 1 || calls["tools/list"] != 1 {
+		t.Fatalf("discovery was forwarded after warming: %#v", calls)
+	}
+	post("tools/call")
+	if calls["tools/call"] != 1 {
+		t.Fatalf("tools/call was not forwarded: %#v", calls)
 	}
 }
