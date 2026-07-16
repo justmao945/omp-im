@@ -25,32 +25,22 @@ type localACPSessionRecord struct {
 // localACPAgent starts one local ACP process for each IM conversation.
 type localACPAgent struct {
 	cfg      localACPConfig
-	mcpProxy *mcpWarmProxy
 	sessions map[string]localACPSessionRecord
 	mu       sync.Mutex
 }
 
 func newLocalACPAgent(cfg localACPConfig) *localACPAgent {
 	cfg.args = append([]string(nil), cfg.args...)
-	return &localACPAgent{
-		cfg:      cfg,
-		mcpProxy: newMCPWarmProxy(),
-		sessions: make(map[string]localACPSessionRecord),
-	}
+	return &localACPAgent{cfg: cfg, sessions: make(map[string]localACPSessionRecord)}
 }
 
 func (a *localACPAgent) Name() string { return a.cfg.name }
 
-func (a *localACPAgent) Stop() error {
-	return a.mcpProxy.Close()
-}
+// Stop is a no-op; sessions own their transports.
+func (a *localACPAgent) Stop() error { return nil }
 
 func (a *localACPAgent) StartSession(ctx context.Context, sessionKey string, project core.Project, resumeSessionID string) (core.AgentSession, error) {
 	mcpServers, err := loadMCPServers(a.cfg.name, project.WorkDir)
-	if err != nil {
-		return nil, err
-	}
-	mcpServers, err = a.mcpProxy.warmHTTPServers(ctx, mcpServers)
 	if err != nil {
 		return nil, err
 	}
