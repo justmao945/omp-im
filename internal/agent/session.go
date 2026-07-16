@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -346,7 +347,8 @@ func (s *Session) Respond(ctx context.Context, prompt string, images []core.Imag
 		}
 	}
 
-	blocks := []any{map[string]any{"type": "text", "text": buildPromptWithFiles(prompt, files)}}
+	textPrompt := buildPromptWithFiles(prompt, files) + mcpPromptContext(s.cfg.MCPServers)
+	blocks := []any{map[string]any{"type": "text", "text": textPrompt}}
 	for _, img := range images {
 		blocks = append(blocks, map[string]any{
 			"type":     "image",
@@ -1130,4 +1132,31 @@ func truncate(s string, max int) string {
 		return string(runes[:max])
 	}
 	return string(runes[:max-3]) + "..."
+}
+
+func mcpPromptContext(servers []any) string {
+	names := make(map[string]struct{}, len(servers))
+	for _, server := range servers {
+		config, ok := server.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := config["name"].(string)
+		if name != "" {
+			names[name] = struct{}{}
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+
+	sortedNames := make([]string, 0, len(names))
+	for name := range names {
+		sortedNames = append(sortedNames, name)
+	}
+	sort.Strings(sortedNames)
+	return "\n\n[ACP MCP context]\n" +
+		"Injected MCP servers for this session: " + strings.Join(sortedNames, ", ") + ". " +
+		"Use their registered mcp__<server>_<tool> tools when relevant. " +
+		"`mcp://` may report no manager in ACP mode; that does not mean these injected tools are unavailable."
 }
