@@ -3,8 +3,12 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -267,5 +271,101 @@ func TestRPCMessagePreservesZeroID(t *testing.T) {
 	}
 	if string(response) != `{"jsonrpc":"2.0","id":0,"result":{}}` {
 		t.Fatalf("response = %s, want id:0 preserved", response)
+	}
+}
+
+// TestACPRegistersHTTPMCP verifies that a valid MCP server reaches the ACP tool registry.
+// It is opt-in because it invokes the locally authenticated omp agent.
+func TestACPRegistersHTTPMCP(t *testing.T) {
+	if os.Getenv("OMP_ACP_INTEGRATION") != "1" {
+		t.Skip("set OMP_ACP_INTEGRATION=1 to run against the local omp ACP agent")
+	}
+	if _, err := exec.LookPath("omp"); err != nil {
+		t.Skip("omp not in PATH")
+	}
+	slowDiscovery := os.Getenv("OMP_ACP_SLOW_MCP") == "1"
+
+	var initializeCalls atomic.Int32
+	var listCalls atomic.Int32
+	var toolCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if r.Method == http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		var request struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode MCP request: %v", err)
+			return
+		}
+		var result any
+		switch request.Method {
+		case "initialize":
+			initializeCalls.Add(1)
+			result = map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{"tools": map[string]any{}}, "serverInfo": map[string]any{"name": "probe", "version": "1.0.0"}}
+			if slowDiscovery {
+				time.Sleep(300 * time.Millisecond)
+			}
+		case "tools/list":
+			listCalls.Add(1)
+			if slowDiscovery {
+				time.Sleep(300 * time.Millisecond)
+			}
+			result = map[string]any{"tools": []any{map[string]any{
+				"name":        "ping",
+				"description": "Returns the exact text pong.",
+				"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
+			}}}
+		case "tools/call":
+			toolCalls.Add(1)
+			result = map[string]any{"content": []any{map[string]any{"type": "text", "text": "pong"}}}
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+			return
+		default:
+			t.Errorf("unexpected MCP method %q", request.Method)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+	}))
+	defer upstream.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	cfg := Config{
+		Command:          "omp",
+		Args:             []string{"acp"},
+		WorkDir:          t.TempDir(),
+		AutoApproveTools: true,
+		MCPServers: []any{map[string]any{
+			"name":    "probe",
+			"type":    "http",
+			"headers": []map[string]string{},
+			"url":     upstream.URL,
+		}},
+	}
+	transport, err := NewTransport(cfg, nil)
+	if err != nil {
+		t.Fatalf("start ACP transport: %v", err)
+	}
+	defer transport.Close()
+	session, err := NewSession(ctx, cfg, "test:fast-http-mcp", "", transport)
+	if err != nil {
+		t.Fatalf("create ACP session: %v", err)
+	}
+	defer session.Close()
+
+	reply, _, err := session.Respond(ctx, "Call exactly mcp__probe_ping with {}. Do not call any other tool. Return its result.", nil, nil, nil)
+	if err != nil {
+		t.Fatalf("request MCP tool call: %v", err)
+	}
+	t.Logf("agent reply: %s", reply)
+	if toolCalls.Load() != 1 {
+		t.Fatalf("ACP did not register MCP tool; slow discovery = %t, initialize = %d, tools/list = %d, tools/call = %d", slowDiscovery, initializeCalls.Load(), listCalls.Load(), toolCalls.Load())
 	}
 }
