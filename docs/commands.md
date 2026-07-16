@@ -13,7 +13,7 @@ Send these as messages in any supported IM conversation.
 | `/sw <n or id>` | Switch to one of the sessions listed by `/ls` (by 1-based index or session-id prefix). The next message resumes that conversation. |
 | `/p` | Show current agent, project, active model, and context usage. |
 | `/esc` | Cancel the currently generating reply. Sends `session/cancel` so the agent stops immediately instead of burning tokens. |
-| `/display` | Toggle stream display between **full** (thinking + tools inline) and simplified (body text only). `/display full` or `/display off` sets it explicitly. |
+| `/display` | Show current stream display settings. `/display mode full` shows thinking + tool activity inline; `/display mode simple` shows body text only. `/display footer on` / `/display footer off` toggles the turn-summary footer. |
 | `//<cmd>` | Pass a slash command through to the agent (e.g. `//web query` sends `/web query` to the agent as a normal prompt). |
 | `/help`, `/?` | Show the command list. |
 

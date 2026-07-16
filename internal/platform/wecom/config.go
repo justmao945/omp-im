@@ -13,7 +13,6 @@ type config struct {
 	allowFrom       string
 	groupAllowFrom  string
 	stream         bool
-	footer         bool
 }
 
 func parseConfig(opts map[string]any) (*config, error) {
@@ -38,14 +37,6 @@ func parseConfig(opts map[string]any) (*config, error) {
 			return nil, fmt.Errorf("wecom: stream must be a boolean")
 		}
 	}
-	footer := true
-	if value, exists := opts["footer"]; exists {
-		var ok bool
-		footer, ok = value.(bool)
-		if !ok {
-			return nil, fmt.Errorf("wecom: footer must be a boolean")
-		}
-	}
 	return &config{
 		botID:          strings.TrimSpace(botID),
 		secret:         strings.TrimSpace(secret),
@@ -53,7 +44,6 @@ func parseConfig(opts map[string]any) (*config, error) {
 		allowFrom:      strings.TrimSpace(allowFrom),
 		groupAllowFrom: strings.TrimSpace(groupAllowFrom),
 		stream:         stream,
-		footer:         footer,
 	}, nil
 }
 

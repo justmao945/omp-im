@@ -35,18 +35,14 @@ type StreamReplyer interface {
 	StreamEvent(ctx context.Context, replyCtx any, event StreamEvent) error
 }
 
-// FooterEnabled is implemented by platforms that can toggle the turn-summary
-// footer (⏱️ Xs · 🧠 X%). Platforms that do not implement it get no footer
-// in the non-streaming reply path.
-type FooterEnabled interface {
-	FooterEnabled() bool
-}
-
-// DisplayProvider returns the current stream display mode: "" (simplified,
-// body text only) or "full" (thinking + tool activity inline). The engine
-// implements this so platforms can render based on a runtime-toggleable value.
+// DisplayProvider returns the runtime-toggleable presentation settings
+// controlled by the /display command: the stream display mode ("" for
+// simplified, body-text-only, or "full" for thinking + tool activity inline)
+// and whether the turn-summary footer is appended. The engine implements this
+// so platforms render based on a shared, runtime-toggleable value.
 type DisplayProvider interface {
 	DisplayMode() string
+	DisplayFooter() bool
 }
 
 // DisplaySetter is implemented by platforms that render streams based on a

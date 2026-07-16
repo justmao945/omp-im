@@ -37,8 +37,9 @@ type Engine struct {
 	activeTurns   map[string]context.CancelFunc
 	activeTurnsMu sync.Mutex
 
-	displayMode string
-	displayMu   sync.RWMutex
+	displayMode   string
+	displayFooter bool
+	displayMu     sync.RWMutex
 }
 
 type queuedMessage struct {
@@ -76,6 +77,7 @@ func NewEngine(agents map[string]Agent, defaultAgent string, projects map[string
 		sessions:       make(map[string]*sessionEntry),
 		lastListings:   make(map[string][]SessionInfo),
 		activeTurns:    make(map[string]context.CancelFunc),
+		displayFooter:  true,
 	}
 }
 
@@ -162,6 +164,20 @@ func (e *Engine) SetDisplayMode(mode string) {
 	}
 	e.displayMu.Lock()
 	e.displayMode = mode
+	e.displayMu.Unlock()
+}
+
+// DisplayFooter reports whether the turn-summary footer is appended.
+func (e *Engine) DisplayFooter() bool {
+	e.displayMu.RLock()
+	defer e.displayMu.RUnlock()
+	return e.displayFooter
+}
+
+// SetDisplayFooter enables or disables the turn-summary footer.
+func (e *Engine) SetDisplayFooter(enabled bool) {
+	e.displayMu.Lock()
+	e.displayFooter = enabled
 	e.displayMu.Unlock()
 }
 
@@ -300,20 +316,11 @@ func streamReplyer(p Platform) (StreamReplyer, bool) {
 	return streamer, true
 }
 
-// footerEnabled reports whether the platform wants a turn-summary footer on
-// non-streaming replies. Platforms that do not implement FooterEnabled get
-// no footer.
-func footerEnabled(p Platform) bool {
-	if f, ok := p.(FooterEnabled); ok {
-		return f.FooterEnabled()
-	}
-	return false
-}
-
 // buildNonStreamingFooter builds a turn footer for non-streaming replies from
-// the session's final status and the recorded turn start time.
-func buildNonStreamingFooter(p Platform, session AgentSession, turnStart time.Time) string {
-	if !footerEnabled(p) {
+// the session's final status and the recorded turn start time. It returns an
+// empty string when the footer is disabled.
+func buildNonStreamingFooter(footerEnabled bool, session AgentSession, turnStart time.Time) string {
+	if !footerEnabled {
 		return ""
 	}
 	st := session.Status()
@@ -440,7 +447,7 @@ func (e *Engine) processNormalMessage(ctx context.Context, cancel context.Cancel
 	slog.Info("agent turn finished", "session", msg.SessionKey, "reply_len", len(reply), "attachments", len(attachments))
 
 	if !streaming {
-		if f := buildNonStreamingFooter(p, Session, turnStart); f != "" {
+		if f := buildNonStreamingFooter(e.DisplayFooter(), Session, turnStart); f != "" {
 			reply = strings.TrimSpace(reply) + "\n\n" + f
 		}
 		if err := p.Reply(ctx, msg.ReplyCtx, reply); err != nil {
@@ -558,7 +565,7 @@ func parseCommand(s string) (command, bool) {
 	name := strings.TrimPrefix(parts[0], "/")
 	arg := ""
 	if len(parts) > 1 {
-		arg = parts[1]
+		arg = strings.Join(parts[1:], " ")
 	}
 	return command{name: name, arg: arg}, true
 }
@@ -636,12 +643,10 @@ func (e *Engine) handleHelpCommand(ctx context.Context, p Platform, msg *Message
 		"- `/proj <name>` — switch to the named project\n"+
 		"\n**Session**\n"+
 		"- `/new` — start a new session (closes the current one, next message starts fresh)\n"+
-		"- `/ls` — list the current agent's own historical sessions for this project\n"+
 		"- `/sw <n or id>` — switch to one of the listed sessions (resumes it next message)\n"+
 		"\n**Status & Control**\n"+
-		"- `/p` — show current agent, project, model, and context usage\n"+
+		"- `/display` — show stream display settings; `/display mode full|simple` sets rendering, `/display footer on|off` toggles the turn-summary footer\n"+
 		"- `/esc` — cancel the currently generating reply\n"+
-		"- `/display` — toggle stream display between **full** (thinking + tools) and simplified (body only)\n"+
 		"\n**Other**\n"+
 		"- `//<cmd>` — pass a slash command through to the agent (e.g. `//web query`)\n"+
 		"- `/help`, `/?` — show this help")
@@ -649,29 +654,62 @@ func (e *Engine) handleHelpCommand(ctx context.Context, p Platform, msg *Message
 
 func (e *Engine) handleDisplayCommand(ctx context.Context, p Platform, msg *Message, arg string) {
 	arg = strings.ToLower(strings.TrimSpace(arg))
-	var mode string
-	switch arg {
-	case "":
-		// Toggle between full and simplified.
-		if e.DisplayMode() == "full" {
-			mode = ""
-		} else {
-			mode = "full"
+
+	// /display footer on|off
+	if strings.HasPrefix(arg, "footer") {
+		sub := strings.TrimSpace(strings.TrimPrefix(arg, "footer"))
+		switch sub {
+		case "on", "true", "1":
+			e.SetDisplayFooter(true)
+			_ = p.Reply(ctx, msg.ReplyCtx, "Display footer: **on**")
+		case "off", "false", "0":
+			e.SetDisplayFooter(false)
+			_ = p.Reply(ctx, msg.ReplyCtx, "Display footer: **off**")
+		default:
+			_ = p.Reply(ctx, msg.ReplyCtx, "Usage: `/display footer on` or `/display footer off`.")
 		}
-	case "full":
-		mode = "full"
-	case "off", "simple", "concise":
-		mode = ""
-	default:
-		_ = p.Reply(ctx, msg.ReplyCtx, "Usage: `/display` toggles between full and simplified.\n`/display full` or `/display off` sets it explicitly.")
 		return
 	}
-	e.SetDisplayMode(mode)
-	label := "simplified (body only)"
-	if mode == "full" {
-		label = "full (thinking + tools)"
+
+	// /display mode full|simple
+	if strings.HasPrefix(arg, "mode") {
+		sub := strings.TrimSpace(strings.TrimPrefix(arg, "mode"))
+		switch sub {
+		case "full":
+			e.SetDisplayMode("full")
+			_ = p.Reply(ctx, msg.ReplyCtx, "Display mode: **full** (thinking + tools)")
+		case "simple", "simplified", "off", "concise":
+			e.SetDisplayMode("")
+			_ = p.Reply(ctx, msg.ReplyCtx, "Display mode: **simplified** (body only)")
+		default:
+			_ = p.Reply(ctx, msg.ReplyCtx, "Usage: `/display mode full` or `/display mode simple`.")
+		}
+		return
 	}
-	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Display mode: **%s**", label))
+
+	// /display — show current settings.
+	switch arg {
+	case "", "status":
+		_ = p.Reply(ctx, msg.ReplyCtx, e.displayStatus())
+	default:
+		_ = p.Reply(ctx, msg.ReplyCtx, "Usage:\n"+
+			"- `/display` — show current settings\n"+
+			"- `/display mode full` | `/display mode simple` — stream rendering\n"+
+			"- `/display footer on` | `/display footer off` — turn-summary footer")
+	}
+}
+
+// displayStatus renders the current display settings as a status message.
+func (e *Engine) displayStatus() string {
+	modeLabel := "simplified (body only)"
+	if e.DisplayMode() == "full" {
+		modeLabel = "full (thinking + tools)"
+	}
+	footerState := "off"
+	if e.DisplayFooter() {
+		footerState = "on"
+	}
+	return fmt.Sprintf("## Display\n\n- **Mode:** %s\n- **Footer:** %s", modeLabel, footerState)
 }
 
 func (e *Engine) handleEscCommand(ctx context.Context, p Platform, msg *Message) {

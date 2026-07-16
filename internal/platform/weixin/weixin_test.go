@@ -93,25 +93,3 @@ func TestSanitizePathSegment(t *testing.T) {
 		}
 	}
 }
-
-func TestFooterEnabled(t *testing.T) {
-	p, err := New(map[string]any{"token": "test-token"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !p.FooterEnabled() {
-		t.Fatal("footer should default to enabled")
-	}
-
-	p2, err := New(map[string]any{"token": "test-token", "footer": false})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p2.FooterEnabled() {
-		t.Fatal("footer should be disabled")
-	}
-
-	if _, err := New(map[string]any{"token": "test-token", "footer": "false"}); err == nil {
-		t.Fatal("expected error for non-boolean footer")
-	}
-}

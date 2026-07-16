@@ -21,9 +21,28 @@ type Config struct {
 	// SessionStore is the path to a bbolt database that persists agent session IDs
 	// across restarts. If empty, it defaults to <user home>/.omp-im/sessions.db.
 	SessionStore string `json:"session_store,omitempty"`
-	// Display controls stream rendering: "" (default) shows only body text,
-	// "full" shows thinking and tool activity inline. Toggle at runtime via /display.
-	Display string `json:"display,omitempty"`
+	// Display groups the runtime-toggleable presentation settings, both
+	// controlled by the /display command: the stream rendering mode and the
+	// turn-summary footer.
+	Display DisplayConfig `json:"display,omitempty"`
+}
+
+// DisplayConfig groups the stream rendering mode and the turn-summary footer.
+// Both are global (shared across platforms) and toggleable at runtime via
+// /display.
+type DisplayConfig struct {
+	// Mode controls stream rendering: "" (default) shows only body text,
+	// "full" shows thinking and tool activity inline.
+	Mode string `json:"mode,omitempty"`
+	// Footer appends a turn-summary footer (⏱️ Xs · 🧠 X%). A nil pointer
+	// means the default (enabled); set to false to disable.
+	Footer *bool `json:"footer,omitempty"`
+}
+
+// FooterEnabled reports whether the footer should be appended. A nil pointer
+// means the default (enabled).
+func (d DisplayConfig) FooterEnabled() bool {
+	return d.Footer == nil || *d.Footer
 }
 
 // ProjectConfig configures a project with its own working directory.
@@ -161,11 +180,11 @@ func (c *Config) Validate() error {
 			weixinAccounts[account] = i
 		}
 	}
-	display := strings.ToLower(strings.TrimSpace(c.Display))
-	if display != "" && display != "full" {
-		return fmt.Errorf("display must be \"\" or \"full\"")
+	mode := strings.ToLower(strings.TrimSpace(c.Display.Mode))
+	if mode != "" && mode != "full" {
+		return fmt.Errorf("display.mode must be \"\" or \"full\"")
 	}
-	c.Display = display
+	c.Display.Mode = mode
 	return nil
 }
 

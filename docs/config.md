@@ -38,7 +38,7 @@
 | `default.project` | `string` | Default project for new conversations. |
 | `platforms` | `[]PlatformConfig` | IM platforms: `weixin`, `wecom`, or the test-only `http` platform. |
 | `session_store` | `string` | Optional bbolt path for persisted agent session IDs. Defaults to `~/.omp-im/sessions.db`. |
-| `display` | `string` | Stream rendering: `""` (default, body text only) or `full` (show thinking + tool activity inline). Toggle at runtime with `/display`. |
+| `display` | `object` | Stream rendering and footer settings. See [DisplayConfig](#displayconfig). Toggle either at runtime with `/display`. |
 
 ### ProjectConfig
 
@@ -48,6 +48,17 @@
 
 - `name` — unique project identifier.
 - `work_dir` — absolute or relative path used as the agent's working directory. `omp-im` creates this directory on startup if it does not exist.
+
+### DisplayConfig
+
+```json
+{ "mode": "full", "footer": true }
+```
+
+- `mode` — stream rendering: `""` (default, body text only) or `full` (show thinking + tool activity inline). Set at runtime with `/display mode full|simple`.
+- `footer` — append a turn-summary footer (⏱️ elapsed · 🧠 context%) to replies. Defaults to `true`; set to `false` to disable. Set at runtime with `/display footer on|off`.
+
+Both settings are global and shared across all platforms. Omit the object entirely for the defaults (simplified mode, footer on).
 
 ### PlatformConfig
 
@@ -71,7 +82,6 @@
 | `state_dir` | `string` | Override the default Weixin state directory. |
 | `proxy` | `string` | Optional HTTP proxy for the iLink gateway. |
 | `route_tag` | `string` | Optional route tag passed to the iLink API. |
-| `footer` | `bool` | Append a turn-summary footer (⏱️ elapsed · 🧠 context%). Defaults to `true`. |
 
 ### WeCom options
 
@@ -83,7 +93,6 @@
 | `allow_from` | `string` | Comma-separated list of allowed sender user IDs for direct messages. `"*"` or empty allows everyone. |
 | `group_allow_from` | `string` | Comma-separated list of allowed group chat IDs. `"*"` or empty allows all groups. |
 | `stream` | `bool` | Send incremental replies. Defaults to `true`; set to `false` to send only the completed reply. |
-| `footer` | `bool` | Append a turn-summary footer (⏱️ elapsed · 🧠 context%). Defaults to `true`. |
 
 Sessions are isolated by chat: each group chat uses its own `session_key` (`wecom:<chatid>`), and each direct message user also gets a separate session.
 

@@ -126,39 +126,59 @@ func TestValidateDisplayMode(t *testing.T) {
 	}
 	t.Run("empty is valid", func(t *testing.T) {
 		cfg := base()
-		cfg.Display = ""
+		cfg.Display.Mode = ""
 		if err := cfg.Validate(); err != nil {
 			t.Fatalf("Validate(): %v", err)
 		}
-		if cfg.Display != "" {
-			t.Fatalf("Display = %q, want empty", cfg.Display)
+		if cfg.Display.Mode != "" {
+			t.Fatalf("Display.Mode = %q, want empty", cfg.Display.Mode)
 		}
 	})
 	t.Run("full is valid", func(t *testing.T) {
 		cfg := base()
-		cfg.Display = "full"
+		cfg.Display.Mode = "full"
 		if err := cfg.Validate(); err != nil {
 			t.Fatalf("Validate(): %v", err)
 		}
-		if cfg.Display != "full" {
-			t.Fatalf("Display = %q, want full", cfg.Display)
+		if cfg.Display.Mode != "full" {
+			t.Fatalf("Display.Mode = %q, want full", cfg.Display.Mode)
 		}
 	})
 	t.Run("invalid rejected", func(t *testing.T) {
 		cfg := base()
-		cfg.Display = "verbose"
+		cfg.Display.Mode = "verbose"
 		if err := cfg.Validate(); err == nil {
 			t.Fatal("expected error for invalid display mode")
 		}
 	})
 	t.Run("normalized to lowercase", func(t *testing.T) {
 		cfg := base()
-		cfg.Display = "FULL"
+		cfg.Display.Mode = "FULL"
 		if err := cfg.Validate(); err != nil {
 			t.Fatalf("Validate(): %v", err)
 		}
-		if cfg.Display != "full" {
-			t.Fatalf("Display = %q, want full", cfg.Display)
+		if cfg.Display.Mode != "full" {
+			t.Fatalf("Display.Mode = %q, want full", cfg.Display.Mode)
+		}
+	})
+	t.Run("footer defaults to enabled", func(t *testing.T) {
+		cfg := base()
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("Validate(): %v", err)
+		}
+		if !cfg.Display.FooterEnabled() {
+			t.Fatal("FooterEnabled() = false, want true (nil means default on)")
+		}
+	})
+	t.Run("footer disabled", func(t *testing.T) {
+		cfg := base()
+		off := false
+		cfg.Display.Footer = &off
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("Validate(): %v", err)
+		}
+		if cfg.Display.FooterEnabled() {
+			t.Fatal("FooterEnabled() = true, want false")
 		}
 	})
 }

@@ -10,14 +10,13 @@
     "agent": "omp",
     "project": "default"
   },
-  "display": "",
+  "display": { "mode": "", "footer": true },
   "platforms": [
     {
       "type": "weixin",
       "name": "default",
       "options": {
-        "allow_from": "*",
-        "footer": true
+        "allow_from": "*"
       }
     },
     {
@@ -26,7 +25,6 @@
         "bot_id": "YOUR_BOT_ID",
         "secret": "YOUR_BOT_SECRET",
         "stream": true,
-        "footer": true,
         "allow_from": "*",
         "group_allow_from": "*"
       }

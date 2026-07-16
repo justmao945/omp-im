@@ -44,13 +44,13 @@ Leave `platforms[].options.token` empty, then log in interactively:
 omp-im -config ~/.omp-im/config.json weixin login
 ```
 
-The QR-code session is retained under `~/.omp-im/weixin/`. Set `token` instead when using an existing iLink bot token. Limit senders with `allow_from` (`"*"` or empty permits everyone). A turn-summary footer (⏱️ elapsed · 🧠 context%) is appended to each reply by default; set `footer` to `false` to disable it.
+The QR-code session is retained under `~/.omp-im/weixin/`. Set `token` instead when using an existing iLink bot token. Limit senders with `allow_from` (`"*"` or empty permits everyone). A turn-summary footer (⏱️ elapsed · 🧠 context%) is appended to each reply by default; turn it off with `/display footer off` or set `display.footer` to `false` in the config.
 
 ### WeCom
 
-Configure a `wecom` platform with `bot_id` and `secret`. It connects to the AI bot WebSocket gateway, supports direct and group chats, and accepts text, images, files, voice, mixed messages, and quoted messages. Replies stream by default; set `stream` to `false` to send only a completed reply. A turn-summary footer (⏱️ elapsed · 🧠 context%) is appended by default; set `footer` to `false` to disable it. Quote content is appended to the agent prompt under `[quoted message]`.
+Configure a `wecom` platform with `bot_id` and `secret`. It connects to the AI bot WebSocket gateway, supports direct and group chats, and accepts text, images, files, voice, mixed messages, and quoted messages. Replies stream by default; set `stream` to `false` to send only a completed reply. A turn-summary footer (⏱️ elapsed · 🧠 context%) is appended by default; turn it off with `/display footer off` or set `display.footer` to `false` in the config. Quote content is appended to the agent prompt under `[quoted message]`.
 
-Use `allow_from` for direct-message user IDs and `group_allow_from` for group chat IDs. Both default to allowing everyone; configure explicit IDs in production. Set the top-level `display` option to `"full"` to show agent thinking and tool activity inline during streaming (default is body-text-only); toggle it at runtime with the `/display` command.
+Use `allow_from` for direct-message user IDs and `group_allow_from` for group chat IDs. Both default to allowing everyone; configure explicit IDs in production. Set the top-level `display.mode` option to `"full"` to show agent thinking and tool activity inline during streaming (default is body-text-only); switch it at runtime with `/display mode full` or `/display mode simple`.
 
 ### Local HTTP testing
 

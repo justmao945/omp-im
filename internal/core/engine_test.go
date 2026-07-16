@@ -181,16 +181,9 @@ func TestStreamReplyerRespectsPlatformSetting(t *testing.T) {
 	}
 }
 
-type footerPlatform struct {
-	*fakePlatform
-	footer bool
-}
-
-func (p *footerPlatform) FooterEnabled() bool { return p.footer }
-
 func TestNonStreamingFooterAppended(t *testing.T) {
 	eng, _ := newTestEngine("fake")
-	p := &footerPlatform{fakePlatform: &fakePlatform{name: "fake"}, footer: true}
+	p := &fakePlatform{name: "fake"}
 	eng.AddPlatform(p)
 
 	go func() {
@@ -230,7 +223,8 @@ func TestNonStreamingFooterAppended(t *testing.T) {
 
 func TestNonStreamingFooterDisabled(t *testing.T) {
 	eng, _ := newTestEngine("fake")
-	p := &footerPlatform{fakePlatform: &fakePlatform{name: "fake"}, footer: false}
+	eng.SetDisplayFooter(false)
+	p := &fakePlatform{name: "fake"}
 	eng.AddPlatform(p)
 
 	go func() {
@@ -265,6 +259,63 @@ func TestNonStreamingFooterDisabled(t *testing.T) {
 	}
 	if strings.Contains(replies[0], "⏱️") {
 		t.Fatalf("reply should not contain footer: %q", replies[0])
+	}
+}
+
+func TestDisplayFooterCommand(t *testing.T) {
+	eng := NewEngine(
+		map[string]Agent{"fake": &fakeAgent{name: "fake", reply: "hi"}},
+		"fake",
+		map[string]Project{"default": {Name: "default"}},
+		"default",
+	)
+	p := &fakePlatform{name: "fake"}
+	eng.AddPlatform(p)
+
+	go func() {
+		for p.getHandler() == nil {
+			time.Sleep(5 * time.Millisecond)
+		}
+		// /display footer with no value → usage (no toggle).
+		p.getHandler()(p, &Message{SessionKey: "fake:u1", Platform: "fake", UserID: "u1", Content: "/display footer", ReplyCtx: "ctx"})
+		// Explicit off then on.
+		p.getHandler()(p, &Message{SessionKey: "fake:u1", Platform: "fake", UserID: "u1", Content: "/display footer off", ReplyCtx: "ctx"})
+		p.getHandler()(p, &Message{SessionKey: "fake:u1", Platform: "fake", UserID: "u1", Content: "/display footer on", ReplyCtx: "ctx"})
+		// Status.
+		p.getHandler()(p, &Message{SessionKey: "fake:u1", Platform: "fake", UserID: "u1", Content: "/display status", ReplyCtx: "ctx"})
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		_ = eng.Run()
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	_ = eng.Stop()
+	<-done
+
+	if !eng.DisplayFooter() {
+		t.Fatalf("DisplayFooter = false, want true")
+	}
+
+	p.mu.Lock()
+	replies := append([]string(nil), p.replies...)
+	p.mu.Unlock()
+	if len(replies) != 4 {
+		t.Fatalf("got %d replies, want 4", len(replies))
+	}
+	if !strings.Contains(replies[0], "Usage") {
+		t.Fatalf("bare footer reply = %q, want usage", replies[0])
+	}
+	if !strings.Contains(replies[1], "off") {
+		t.Fatalf("footer off reply = %q, want off", replies[1])
+	}
+	if !strings.Contains(replies[2], "on") {
+		t.Fatalf("footer on reply = %q, want on", replies[2])
+	}
+	if !strings.Contains(replies[3], "Footer:") {
+		t.Fatalf("status reply = %q, want footer state", replies[3])
 	}
 }
 
@@ -313,6 +364,7 @@ func TestEngineRunBlocksUntilStopped(t *testing.T) {
 
 func TestEngineRoutesMessage(t *testing.T) {
 	eng, _ := newTestEngine("fake")
+	eng.SetDisplayFooter(false)
 	p := &fakePlatform{name: "fake"}
 	eng.AddPlatform(p)
 
@@ -493,6 +545,7 @@ func TestEngineAgentCommand(t *testing.T) {
 		map[string]Project{"default": {Name: "default"}},
 		"default",
 	)
+	eng.SetDisplayFooter(false)
 	p := &fakePlatform{name: "fake"}
 	eng.AddPlatform(p)
 
@@ -938,12 +991,13 @@ func TestEngineDisplayCommand(t *testing.T) {
 		for p.getHandler() == nil {
 			time.Sleep(5 * time.Millisecond)
 		}
-		// Toggle on.
+		// Status (default mode is simplified, footer on).
 		p.getHandler()(p, &Message{SessionKey: "fake:u1", Platform: "fake", UserID: "u1", Content: "/display", ReplyCtx: "ctx"})
-		// Toggle off.
-		p.getHandler()(p, &Message{SessionKey: "fake:u1", Platform: "fake", UserID: "u1", Content: "/display", ReplyCtx: "ctx"})
-		// Explicit set to full.
-		p.getHandler()(p, &Message{SessionKey: "fake:u1", Platform: "fake", UserID: "u1", Content: "/display full", ReplyCtx: "ctx"})
+		// Explicit mode.
+		p.getHandler()(p, &Message{SessionKey: "fake:u1", Platform: "fake", UserID: "u1", Content: "/display mode full", ReplyCtx: "ctx"})
+		p.getHandler()(p, &Message{SessionKey: "fake:u1", Platform: "fake", UserID: "u1", Content: "/display mode simple", ReplyCtx: "ctx"})
+		// Explicit footer.
+		p.getHandler()(p, &Message{SessionKey: "fake:u1", Platform: "fake", UserID: "u1", Content: "/display footer off", ReplyCtx: "ctx"})
 	}()
 
 	done := make(chan struct{})
@@ -955,26 +1009,31 @@ func TestEngineDisplayCommand(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	_ = eng.Stop()
 	<-done
-
-	if eng.DisplayMode() != "full" {
-		t.Fatalf("DisplayMode = %q, want full", eng.DisplayMode())
+	if eng.DisplayMode() != "" {
+		t.Fatalf("DisplayMode = %q, want empty (simple)", eng.DisplayMode())
+	}
+	if eng.DisplayFooter() {
+		t.Fatal("DisplayFooter = true, want false")
 	}
 
 	p.mu.Lock()
 	replies := append([]string(nil), p.replies...)
 	p.mu.Unlock()
 
-	if len(replies) != 3 {
-		t.Fatalf("got %d replies, want 3", len(replies))
+	if len(replies) != 4 {
+		t.Fatalf("got %d replies, want 4", len(replies))
 	}
-	if !strings.Contains(replies[0], "full") {
-		t.Fatalf("first toggle reply = %q, want full", replies[0])
+	if !strings.Contains(replies[0], "Mode:") || !strings.Contains(replies[0], "Footer:") {
+		t.Fatalf("status reply = %q, want mode+footer", replies[0])
 	}
-	if !strings.Contains(replies[1], "simplified") {
-		t.Fatalf("second toggle reply = %q, want simplified", replies[1])
+	if !strings.Contains(replies[1], "full") {
+		t.Fatalf("mode full reply = %q, want full", replies[1])
 	}
-	if !strings.Contains(replies[2], "full") {
-		t.Fatalf("explicit full reply = %q, want full", replies[2])
+	if !strings.Contains(replies[2], "simplified") {
+		t.Fatalf("mode simple reply = %q, want simplified", replies[2])
+	}
+	if !strings.Contains(replies[3], "off") {
+		t.Fatalf("footer off reply = %q, want off", replies[3])
 	}
 }
 
@@ -1038,6 +1097,7 @@ func TestEngineMessageOrderingPerSession(t *testing.T) {
 		map[string]Project{"default": {Name: "default", WorkDir: "/tmp"}},
 		"default",
 	)
+	eng.SetDisplayFooter(false)
 	p := &fakePlatform{name: "fake"}
 	eng.AddPlatform(p)
 
@@ -1278,6 +1338,7 @@ func TestEngineSwCommandInvalidIndex(t *testing.T) {
 
 func TestEngineSlashSlashPassthrough(t *testing.T) {
 	eng, _ := newTestEngine("fake")
+	eng.SetDisplayFooter(false)
 	p := &fakePlatform{name: "fake"}
 	eng.AddPlatform(p)
 

@@ -46,11 +46,8 @@ func New(opts map[string]any) (*Platform, error) {
 // StreamingEnabled reports whether the engine should send incremental replies.
 func (p *Platform) StreamingEnabled() bool { return p.cfg.stream }
 
-// FooterEnabled reports whether the turn-summary footer should be appended.
-func (p *Platform) FooterEnabled() bool { return p.cfg.footer }
-
 // SetDisplayProvider injects the engine as the source of the runtime-toggleable
-// display mode. The engine calls this at AddPlatform.
+// display mode and footer. The engine calls this at AddPlatform.
 func (p *Platform) SetDisplayProvider(d core.DisplayProvider) {
 	p.display = d
 }
@@ -62,6 +59,15 @@ func (p *Platform) currentDisplay() string {
 		return p.display.DisplayMode()
 	}
 	return ""
+}
+
+// currentFooter reports whether the turn-summary footer should be appended,
+// defaulting to enabled when no provider is wired yet.
+func (p *Platform) currentFooter() bool {
+	if p.display != nil {
+		return p.display.DisplayFooter()
+	}
+	return true
 }
 
 // Name returns the platform name.

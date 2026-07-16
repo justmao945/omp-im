@@ -184,7 +184,8 @@ func runServer(configPath string) error {
 	if err := engine.SetSessionStore(cfg.SessionStorePath()); err != nil {
 		return fmt.Errorf("load session store: %w", err)
 	}
-	engine.SetDisplayMode(cfg.Display)
+	engine.SetDisplayMode(cfg.Display.Mode)
+	engine.SetDisplayFooter(cfg.Display.FooterEnabled())
 
 	for i, pc := range cfg.Platforms {
 		switch pc.Type {
