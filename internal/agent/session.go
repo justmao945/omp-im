@@ -1157,6 +1157,8 @@ func mcpPromptContext(servers []any) string {
 	sort.Strings(sortedNames)
 	return "\n\n[ACP MCP context]\n" +
 		"Injected MCP servers for this session: " + strings.Join(sortedNames, ", ") + ". " +
-		"Use their registered mcp__<server>_<tool> tools when relevant. " +
-		"`mcp://` may report no manager in ACP mode; that does not mean these injected tools are unavailable."
+		"These servers are registered and callable through their mcp__<server>_<tool> tools. " +
+		"The static xd:// inventory lists host-mounted devices only; it is not the MCP tool registry. " +
+		"Treat a server shown by /mcp list as available even when neither xd:// nor mcp:// lists its tools. " +
+		"Do not report an injected server as unregistered or unavailable on that basis."
 }
