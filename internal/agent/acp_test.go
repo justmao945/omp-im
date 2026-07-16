@@ -380,3 +380,66 @@ func TestACPRegistersHTTPMCP(t *testing.T) {
 		t.Fatalf("ACP did not register MCP tool; slow discovery = %t, warm discovery = %t, initialize = %d, tools/list = %d, tools/call = %d", slowDiscovery, warmDiscovery, initializeCalls.Load(), listCalls.Load(), toolCalls.Load())
 	}
 }
+
+// TestACPRegistersConfiguredWeComMCP verifies the real WeCom server is mounted
+// after discovery is warmed locally. It performs only a read request against an
+// invalid document URL and requires an explicitly authenticated local agent.
+func TestACPRegistersConfiguredWeComMCP(t *testing.T) {
+	if os.Getenv("OMP_ACP_WECOM_INTEGRATION") != "1" {
+		t.Skip("set OMP_ACP_WECOM_INTEGRATION=1 to run against the configured WeCom MCP server")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	servers, err := loadMCPServers("omp", t.TempDir())
+	if err != nil {
+		t.Fatalf("load WeCom MCP configuration: %v", err)
+	}
+	if len(servers) == 0 {
+		t.Fatal("no configured WeCom MCP server")
+	}
+	proxy := newMCPWarmProxy()
+	t.Cleanup(func() { _ = proxy.Close() })
+	servers, err = proxy.warmHTTPServers(ctx, servers)
+	if err != nil {
+		t.Fatalf("warm WeCom MCP server: %v", err)
+	}
+
+	cfg := Config{
+		Command:          "omp",
+		Args:             []string{"acp"},
+		WorkDir:          t.TempDir(),
+		AutoApproveTools: true,
+		MCPServers:       servers,
+	}
+	transport, err := NewTransport(cfg, nil)
+	if err != nil {
+		t.Fatalf("start ACP transport: %v", err)
+	}
+	defer transport.Close()
+	session, err := NewSession(ctx, cfg, "test:wecom-mcp", "", transport)
+	if err != nil {
+		t.Fatalf("create ACP session: %v", err)
+	}
+	defer session.Close()
+
+	var toolStarts atomic.Int32
+	reply, _, err := session.Respond(
+		ctx,
+		"Call exactly mcp__wecom_get_doc_content with {\"url\":\"https://invalid.example.test/\",\"type\":2}. Do not call any other tool. Report the result.",
+		nil,
+		nil,
+		func(event core.StreamEvent) {
+			if event.Type == "tool_start" {
+				toolStarts.Add(1)
+			}
+		},
+	)
+	if err != nil {
+		t.Fatalf("invoke configured WeCom MCP tool: %v", err)
+	}
+	t.Logf("agent reply: %s", reply)
+	if toolStarts.Load() == 0 {
+		t.Fatal("agent did not start a WeCom MCP tool call")
+	}
+}
