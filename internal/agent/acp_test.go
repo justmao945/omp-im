@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -285,6 +284,7 @@ func TestACPRegistersHTTPMCP(t *testing.T) {
 		t.Skip("omp not in PATH")
 	}
 	slowDiscovery := os.Getenv("OMP_ACP_SLOW_MCP") == "1"
+	warmDiscovery := os.Getenv("OMP_ACP_WARM_MCP") == "1"
 
 	var initializeCalls atomic.Int32
 	var listCalls atomic.Int32
@@ -338,17 +338,27 @@ func TestACPRegistersHTTPMCP(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
+	servers := []any{map[string]any{
+		"name":    "probe",
+		"type":    "http",
+		"headers": []map[string]string{},
+		"url":     upstream.URL,
+	}}
+	if warmDiscovery {
+		proxy := newMCPWarmProxy()
+		t.Cleanup(func() { _ = proxy.Close() })
+		var err error
+		servers, err = proxy.warmHTTPServers(ctx, servers)
+		if err != nil {
+			t.Fatalf("warm MCP server: %v", err)
+		}
+	}
 	cfg := Config{
 		Command:          "omp",
 		Args:             []string{"acp"},
 		WorkDir:          t.TempDir(),
 		AutoApproveTools: true,
-		MCPServers: []any{map[string]any{
-			"name":    "probe",
-			"type":    "http",
-			"headers": []map[string]string{},
-			"url":     upstream.URL,
-		}},
+		MCPServers:       servers,
 	}
 	transport, err := NewTransport(cfg, nil)
 	if err != nil {
@@ -367,6 +377,6 @@ func TestACPRegistersHTTPMCP(t *testing.T) {
 	}
 	t.Logf("agent reply: %s", reply)
 	if toolCalls.Load() != 1 {
-		t.Fatalf("ACP did not register MCP tool; slow discovery = %t, initialize = %d, tools/list = %d, tools/call = %d", slowDiscovery, initializeCalls.Load(), listCalls.Load(), toolCalls.Load())
+		t.Fatalf("ACP did not register MCP tool; slow discovery = %t, warm discovery = %t, initialize = %d, tools/list = %d, tools/call = %d", slowDiscovery, warmDiscovery, initializeCalls.Load(), listCalls.Load(), toolCalls.Load())
 	}
 }
