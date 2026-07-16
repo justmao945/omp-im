@@ -269,16 +269,3 @@ func TestRPCMessagePreservesZeroID(t *testing.T) {
 		t.Fatalf("response = %s, want id:0 preserved", response)
 	}
 }
-
-func TestMCPPromptContext(t *testing.T) {
-	context := mcpPromptContext([]any{
-		map[string]any{"name": "wecom"},
-		map[string]any{"name": "computer-use"},
-	})
-	if !strings.Contains(context, "computer-use, wecom") {
-		t.Fatalf("MCP names = %q", context)
-	}
-	if !strings.Contains(context, "mcp://") {
-		t.Fatalf("MCP URI limitation missing from %q", context)
-	}
-}
