@@ -32,7 +32,7 @@ make install-user # installs ~/.local/bin/omp-im
 
 Claude Code and Codex use their own local CLI credentials. `omp-im` reports the installation command when a selected ACP adapter is unavailable.
 
-> `omp` tool calls are auto-approved. Restrict platform access with `allow_from` and `group_allow_from` before exposing it to other users.
+> `omp` tool calls are auto-approved. Restrict platform access with `allow_from` before exposing it to other users.
 
 ## Platforms
 
