@@ -335,7 +335,7 @@ func buildNonStreamingFooter(footerEnabled bool, session AgentSession, turnStart
 func (e *Engine) processNormalMessage(ctx context.Context, cancel context.CancelFunc, p Platform, msg *Message, ent *sessionEntry) {
 	streamer, streaming := streamReplyer(p)
 
-	// Send an initial empty stream frame so the WeCom client creates a message
+	// Send an initial empty stream frame so the client creates a message
 	// bubble with the "typing" animation before any content arrives. This must
 	// happen before session setup so the user sees immediate feedback.
 	if streaming {

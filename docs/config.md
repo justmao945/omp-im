@@ -36,7 +36,7 @@
 | `projects` | `[]ProjectConfig` | Named working directories passed to the agent. |
 | `default.agent` | `string` | Default agent for new conversations. |
 | `default.project` | `string` | Default project for new conversations. |
-| `platforms` | `[]PlatformConfig` | IM platforms: `weixin`, `wecom`, or the test-only `http` platform. |
+| `platforms` | `[]PlatformConfig` | IM platforms: `weixin` or the test-only `http` platform. |
 | `session_store` | `string` | Optional bbolt path for persisted agent session IDs. Defaults to `~/.omp-im/sessions.db`. |
 | `display` | `object` | Stream rendering and footer settings. See [DisplayConfig](#displayconfig). Toggle either at runtime with `/display`. |
 
@@ -67,7 +67,7 @@ Both settings are global and shared across all platforms. Omit the object entire
 ```
 
 - `name` — optional identifier for this platform instance. For Weixin, it is used as the account name and state directory name.
-- `type` — platform type: `weixin`, `wecom`, or `http`.
+- `type` — platform type: `weixin` or `http`.
 - `options` — platform-specific options.
 
 ### Weixin options
@@ -82,19 +82,6 @@ Both settings are global and shared across all platforms. Omit the object entire
 | `state_dir` | `string` | Override the default Weixin state directory. |
 | `proxy` | `string` | Optional HTTP proxy for the iLink gateway. |
 | `route_tag` | `string` | Optional route tag passed to the iLink API. |
-
-### WeCom options
-
-| Option | Type | Description |
-|--------|------|-------------|
-| `bot_id` | `string` | **Required.** WeCom AI bot ID. |
-| `secret` | `string` | **Required.** WeCom AI bot long-connection secret. |
-| `websocket_url` | `string` | Optional gateway URL. Defaults to `wss://openws.work.weixin.qq.com`. |
-| `allow_from` | `string` | Comma-separated list of allowed sender user IDs for direct messages. `"*"` or empty allows everyone. |
-| `group_allow_from` | `string` | Comma-separated list of allowed group chat IDs. `"*"` or empty allows all groups. |
-| `stream` | `bool` | Send incremental replies. Defaults to `true`; set to `false` to send only the completed reply. |
-
-Sessions are isolated by chat: each group chat uses its own `session_key` (`wecom:<chatid>`), and each direct message user also gets a separate session.
 
 ## QR-code login
 

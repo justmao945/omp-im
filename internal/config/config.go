@@ -167,7 +167,7 @@ func (c *Config) Validate() error {
 	weixinAccounts := make(map[string]int)
 	for i, p := range c.Platforms {
 		switch p.Type {
-		case "weixin", "http", "wecom":
+		case "weixin", "http":
 			// ok
 		default:
 			return fmt.Errorf("platforms[%d] unsupported type %q", i, p.Type)

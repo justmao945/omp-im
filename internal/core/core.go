@@ -51,7 +51,7 @@ type DisplaySetter interface {
 	SetDisplayProvider(DisplayProvider)
 }
 
-// Platform abstracts a messaging platform (Weixin, WeCom, etc.).
+// Platform abstracts a messaging platform (Weixin, etc.).
 type Platform interface {
 	Name() string
 	Start(handler MessageHandler) error

@@ -11,7 +11,6 @@ func TestFindWeixinPlatform(t *testing.T) {
 		Platforms: []config.PlatformConfig{
 			{Name: "work", Type: "weixin", Options: map[string]any{}},
 			{Name: "personal", Type: "weixin", Options: map[string]any{}},
-			{Type: "wecom", Options: map[string]any{"bot_id": "b", "secret": "s"}},
 		},
 	}
 

@@ -1,4 +1,4 @@
-// Command omp-im wires Weixin (and eventually WeCom) to configurable agents.
+// Command omp-im wires Weixin to configurable agents.
 package main
 
 import (
@@ -15,7 +15,6 @@ import (
 	"github.com/justmao945/omp-im/internal/config"
 	"github.com/justmao945/omp-im/internal/core"
 	"github.com/justmao945/omp-im/internal/platform/http"
-	"github.com/justmao945/omp-im/internal/platform/wecom"
 	"github.com/justmao945/omp-im/internal/platform/weixin"
 )
 
@@ -197,12 +196,6 @@ func runServer(configPath string) error {
 			p, err := weixin.New(opts)
 			if err != nil {
 				return fmt.Errorf("create weixin platform %d: %w", i, err)
-			}
-			engine.AddPlatform(p)
-		case "wecom":
-			p, err := wecom.New(pc.Options)
-			if err != nil {
-				return fmt.Errorf("create wecom platform %d: %w", i, err)
 			}
 			engine.AddPlatform(p)
 		case "http":
